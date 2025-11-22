@@ -1,0 +1,10 @@
+# Bỏ qua thư mục môi trường ảo
+venv/
+env/
+
+# Bỏ qua file biên dịch Python (Rác)
+__pycache__/
+*.pyc
+
+# Bỏ qua file cấu hình IDE (nếu dùng VS Code)
+.vscode/
