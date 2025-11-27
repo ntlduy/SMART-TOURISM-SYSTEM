@@ -13,20 +13,254 @@
     <link href="{{url_for('static', filename='css/stype.css')}}" rel="stylesheet"/>
     {% block css %}{% endblock %}
     {% block js %}{%endblock %}
+    <style>
+        /* --- CSS CHO GIAO DIỆN --- */
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f4f9; }
+
+        /* 1. Nút Chat (Hình vuông góc trái) */
+        .chat-launcher {
+            position: fixed;
+            bottom: 20px;
+            left: 20px; /* Theo yêu cầu: Góc trái */
+            width: 60px;
+            height: 60px;
+            background-color: #FF6B6B; /* Màu nổi bật */
+            color: white;
+            border-radius: 12px; /* Bo góc nhẹ để thành hình vuông mềm */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            transition: transform 0.3s;
+            z-index: 1000;
+            font-size: 24px;
+        }
+        .chat-launcher:hover { transform: scale(1.1); }
+
+        /* 2. Khung Chat Box */
+        .chat-window {
+            position: fixed;
+            bottom: 90px;
+            left: 20px; /* Theo yêu cầu: Góc trái */
+            width: 350px;
+            height: 500px;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 5px 30px rgba(0,0,0,0.15);
+            display: none; /* Mặc định ẩn */
+            flex-direction: column;
+            overflow: hidden;
+            z-index: 1000;
+            border: 1px solid #eee;
+        }
+
+        /* Header */
+        .chat-header {
+            background: #FF6B6B;
+            color: white;
+            padding: 15px;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        /* Vùng tin nhắn */
+        .chat-messages {
+            flex: 1;
+            padding: 15px;
+            overflow-y: auto;
+            background: #fff;
+        }
+
+        /* Tin nhắn */
+        .message { margin-bottom: 10px; max-width: 80%; line-height: 1.4; font-size: 14px;}
+        .message.user { margin-left: auto; background: #eee; padding: 10px; border-radius: 15px 15px 0 15px; color: #333; }
+        .message.bot { margin-right: auto; background: #FFF0F0; padding: 10px; border-radius: 15px 15px 15px 0; border: 1px solid #FFD1D1; color: #333; }
+
+        /* 3. Gợi ý (Suggestion Chips) */
+        .suggestion-area {
+            padding: 10px;
+            display: flex;
+            gap: 8px;
+            overflow-x: auto;
+            white-space: nowrap;
+            background: #f9f9f9;
+            border-bottom: 1px solid #eee;
+        }
+        .chip {
+            background: white;
+            border: 1px solid #FF6B6B;
+            color: #FF6B6B;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .chip:hover { background: #FF6B6B; color: white; }
+
+        /* Vùng nhập liệu */
+        .input-area {
+            display: flex;
+            padding: 10px;
+            border-top: 1px solid #eee;
+        }
+        input { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 20px; outline: none; }
+        button.send-btn {
+            background: #FF6B6B; color: white; border: none;
+            padding: 0 15px; margin-left: 10px; border-radius: 20px; cursor: pointer;
+        }
+        
+        /* Loading animation */
+        .typing { font-style: italic; color: #888; font-size: 12px; margin-bottom: 10px; display: none;}
+
+    </style>
 
 </head>
 <body>
     {% block header %}
         {% include 'layout/header.html' %}
     {% endblock%}
+
+
     <div class = "container">
+
+                {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+
+
         {% block content %}{%endblock%}
     </div>
+
+
     
     {%block footer%}
         {% include 'layout/footer.html' %}
     {%endblock%}
 
+
+
+<div class="chat-launcher" onclick="toggleChat()">
+        💬
+    </div>
+
+    <div class="chat-window" id="chatWindow">
+        <div class="chat-header">
+            <span>🎁 Souvenir Expert AI</span>
+            <span style="cursor:pointer" onclick="toggleChat()">✕</span>
+        </div>
+
+        <div class="chat-messages" id="messageContainer">
+            <div class="message bot">Xin chào! Tôi là trợ lý chuyên về quà lưu niệm. Tôi có thể giúp gì cho bạn?</div>
+        </div>
+        
+        <div class="typing" id="typingIndicator" style="padding-left: 15px;">AI đang soạn tin...</div>
+
+        <div class="suggestion-area" id="suggestionArea">
+            </div>
+
+        <div class="input-area">
+            <input type="text" id="userInput" placeholder="Hỏi về quà, chợ..." onkeypress="handleEnter(event)">
+            <button class="send-btn" onclick="sendMessage()">Gửi</button>
+        </div>
+    </div>
+
+
+
+
+<script>
+        const API_URL = "/chat";
+        
+        // Danh sách câu hỏi gợi ý (Song ngữ)
+        const suggestions = [
+            "🇻🇳 Mua quà gì ở Hà Nội?",
+            "🇬🇧 Best souvenirs in Vietnam?",
+            "🇻🇳 Kinh nghiệm trả giá ở chợ?",
+            "🎁 Shop đồ thủ công đẹp?"
+        ];
+
+        // 1. Khởi tạo gợi ý
+        const suggestionArea = document.getElementById('suggestionArea');
+        suggestions.forEach(text => {
+            const chip = document.createElement('div');
+            chip.className = 'chip';
+            chip.innerText = text;
+            chip.onclick = () => {
+                document.getElementById('userInput').value = text;
+                sendMessage();
+            };
+            suggestionArea.appendChild(chip);
+        });
+
+        // 2. Chức năng Bật/Tắt chat
+        let isOpen = false;
+        function toggleChat() {
+            const box = document.getElementById('chatWindow');
+            isOpen = !isOpen;
+            box.style.display = isOpen ? 'flex' : 'none';
+        }
+
+        // 3. Xử lý gửi tin nhắn
+        function handleEnter(e) {
+            if (e.key === 'Enter') sendMessage();
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('userInput');
+            const msg = input.value.trim();
+            if (!msg) return;
+
+            // Hiển thị tin nhắn người dùng
+            addMessage(msg, 'user');
+            input.value = '';
+
+            // Hiển thị trạng thái đang gõ
+            const typing = document.getElementById('typingIndicator');
+            typing.style.display = 'block';
+            
+            // Cuộn xuống cuối
+            const container = document.getElementById('messageContainer');
+            container.scrollTop = container.scrollHeight;
+
+            try {
+                // Gọi xuống Backend
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: msg })
+                });
+                
+                const data = await response.json();
+                typing.style.display = 'none';
+                addMessage(data.reply, 'bot');
+
+            } catch (error) {
+                typing.style.display = 'none';
+                addMessage("Lỗi kết nối server. Hãy chắc chắn bạn đã chạy file backend.py", 'bot');
+            }
+        }
+
+        function addMessage(text, sender) {
+            const container = document.getElementById('messageContainer');
+            const div = document.createElement('div');
+            div.className = `message ${sender}`;
+            div.innerText = text;
+            container.appendChild(div);
+            container.scrollTop = container.scrollHeight;
+        }
+    </script>
     
 </body>
 </html>
+

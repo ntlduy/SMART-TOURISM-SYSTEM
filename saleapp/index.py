@@ -1,9 +1,18 @@
 from __init__ import app, login
-from flask import render_template, request, redirect, url_for
+from flask import render_template, request, redirect, url_for, flash
 import utils
 import math
 import cloudinary.uploader
 from flask_login import login_user, logout_user
+import random
+from datetime import datetime, timedelta
+
+
+from flask import Blueprint, request, jsonify, render_template
+
+#mail
+
+from utils import get_user_by_email, generate_and_send_reset_code, verify_reset_code, update_password
 
 @app.route("/") 
 def index():
@@ -105,7 +114,90 @@ def user_load(user_id) :
 def info_user():
     return render_template("infouser.html")
 
+#mail
+
+@app.route('/forgot-password', methods=['GET', 'POST'])
+def forgot_password():
+    if request.method == 'POST':
+        email = request.form.get('email')
+        user = get_user_by_email(email)
+        
+        
+
+
+
+
+        if user:
+            if generate_and_send_reset_code(user.id):
+                flash('Mã xác nhận đã được gửi đến email của bạn. Vui lòng kiểm tra hộp thư.', 'info')
+                # Chuyển hướng đến trang nhập mã xác nhận
+                return redirect(url_for('verify_code_page', user_id=user.id))
+            else:
+                flash('Lỗi khi gửi email xác nhận. Vui lòng thử lại sau.', 'danger')
+        else:
+            flash('Không tìm thấy tài khoản nào với địa chỉ email này.', 'danger')
+            
+    # Giả sử bạn có template 'forgot_password.html'
+    return render_template('forgot_password.html')
+
+# Route trung gian để hiển thị form nhập mã
+
+@app.route('/verify-code-page/<int:user_id>', methods=['GET'])
+def verify_code_page(user_id):
+    # Dùng GET để chuyển user_id qua. Form POST sẽ gọi route xác minh thực sự.
+    return render_template('verify_code.html', user_id=user_id)
+
+@app.route('/reset-password', methods=['POST'])
+def reset_password():
+    user_id = request.form.get('user_id')
+    code = request.form.get('reset_code')
+    new_password = request.form.get('new_password')
+    confirm_password = request.form.get('confirm_password')
+    
+    # 2a. Kiểm tra mã xác nhận
+    if not verify_reset_code(user_id, code):
+        flash('Mã xác nhận không hợp lệ hoặc đã hết hạn.', 'danger')
+        return redirect(url_for('verify_code_page', user_id=user_id))
+    
+    # 2b. Kiểm tra mật khẩu mới
+    if new_password != confirm_password:
+        flash('Mật khẩu mới và xác nhận mật khẩu không khớp.', 'danger')
+        return render_template('new_password.html', user_id=user_id, code=code) # Giữ lại form
+        
+    if update_password(user_id, new_password):
+        flash('Thay đổi mật khẩu thành công! Vui lòng đăng nhập lại.', 'success')
+        # Chuyển hướng về trang đăng nhập
+        return redirect(url_for('user_signin'))
+    else:
+        flash('Lỗi khi cập nhật mật khẩu. Vui lòng thử lại.', 'danger')
+        return redirect(url_for('verify_code_page', user_id=user_id))
+    
+# Route để hiển thị form nhập mật khẩu mới (sau khi mã được nhập)
+@app.route('/new-password-form', methods=['POST'])
+def new_password_form():
+    user_id = request.form.get('user_id')
+    code = request.form.get('reset_code')
+    
+    if verify_reset_code(user_id, code):
+        # Giả sử bạn có template 'new_password.html'
+        # Chuyển user_id và code ẩn qua form để POST lên /reset-password
+        return render_template('new_password.html', user_id=user_id, code=code)
+    else:
+        flash('Mã xác nhận không hợp lệ hoặc đã hết hạn.', 'danger')
+        return redirect(url_for('verify_code_page', user_id=user_id))
+
+
+
+
+
+
+# --- Route Chat AI mới ---
+
+
+
+
 
 if __name__ == '__main__':
     from admin import *
     app.run(debug=True)
+

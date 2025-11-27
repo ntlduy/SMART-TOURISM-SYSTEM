@@ -25,6 +25,11 @@ class User(BaseModel, UserMixin) :
     joined_date = Column(DateTime, default=datetime.now()) 
     user_role = Column(Enum(UserRole), default=UserRole.USER)
 
+    reset_code = Column(String(10), nullable=True) 
+    code_expiration = Column(DateTime, nullable=True)
+
+    
+
 
 class Shop(BaseModel):
     id = Column(Integer, primary_key=True, autoincrement=True)
