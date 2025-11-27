@@ -5,7 +5,7 @@
     <title>
         {% block title %}{% endblock %}
     </title>
-    
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css" integrity="sha384-xOolHFLEh07PJGoPkLv1IbcEPTNtaed2xpHsD9ESMhqIYd0nLMwNLD69Npy4HI+N" crossorigin="anonymous">
     <script src="https://cdn.jsdelivr.net/npm/jquery@3.5.1/dist/jquery.slim.min.js" integrity="sha384-DfXdz2htPH0lsSSs5nCTpuj/zy4C+OGpamoFVy38MVBnE+IbbVYUew+OrCXaRkfj" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js" integrity="sha384-9/reFTGAW83EW2RDu2S0VKaIzap3H66lZH81PoYlFhbGU+6BZp6G7niu735Sk7lN" crossorigin="anonymous"></script>
@@ -180,86 +180,145 @@
 
 
 <script>
-        const API_URL = "/chat";
+    const API_URL = "/chat";
+
+    // 1. LẤY DỮ LIỆU TỪ LOCAL STORAGE HOẶC KHỞI TẠO MẶC ĐỊNH
+    let chatHistory = JSON.parse(localStorage.getItem('chatHistory')) || [{
+        "role": "model",
+        "parts": [{"text": "Xin chào! Tôi là trợ lý chuyên về quà lưu niệm. Tôi có thể giúp gì cho bạn?"}]
+    }];
+
+    // 2. HÀM HIỂN THỊ LỊCH SỬ CHAT KHI VỪA VÀO TRANG (Load History)
+    // Chạy ngay khi trang web tải xong
+    document.addEventListener("DOMContentLoaded", function() {
+        const container = document.getElementById('messageContainer');
         
-        // Danh sách câu hỏi gợi ý (Song ngữ)
-        const suggestions = [
-            "🇻🇳 Mua quà gì ở Hà Nội?",
-            "🇬🇧 Best souvenirs in Vietnam?",
-            "🇻🇳 Kinh nghiệm trả giá ở chợ?",
-            "🎁 Shop đồ thủ công đẹp?"
-        ];
+        // Xóa tin nhắn mặc định cứng trong HTML để tránh bị trùng lặp
+        container.innerHTML = ''; 
 
-        // 1. Khởi tạo gợi ý
-        const suggestionArea = document.getElementById('suggestionArea');
-        suggestions.forEach(text => {
-            const chip = document.createElement('div');
-            chip.className = 'chip';
-            chip.innerText = text;
-            chip.onclick = () => {
-                document.getElementById('userInput').value = text;
-                sendMessage();
-            };
-            suggestionArea.appendChild(chip);
+        // Duyệt qua lịch sử và vẽ lại từng tin nhắn
+        chatHistory.forEach(msg => {
+            const role = msg.role === 'model' ? 'bot' : 'user';
+            const text = msg.parts[0].text;
+            addMessage(text, role);
         });
+    });
 
-        // 2. Chức năng Bật/Tắt chat
-        let isOpen = false;
-        function toggleChat() {
-            const box = document.getElementById('chatWindow');
-            isOpen = !isOpen;
-            box.style.display = isOpen ? 'flex' : 'none';
+    // Các gợi ý tin nhắn
+    const suggestions = [
+        "🇻🇳 Mua quà gì ở Hà Nội?",
+        "🇬🇧 Best souvenirs in Vietnam?",
+        "🇻🇳 Kinh nghiệm trả giá ở chợ?",
+        "🎁 Shop đồ thủ công đẹp?"
+    ];
+
+    const suggestionArea = document.getElementById('suggestionArea');
+    suggestions.forEach(text => {
+        const chip = document.createElement('div');
+        chip.className = 'chip';
+        chip.innerText = text;
+        chip.onclick = () => {
+            document.getElementById('userInput').value = text;
+            sendMessage();
+        };
+        suggestionArea.appendChild(chip);
+    });
+
+    // Bật/Tắt khung chat
+    let isOpen = false;
+    function toggleChat() {
+        const box = document.getElementById('chatWindow');
+        isOpen = !isOpen;
+        box.style.display = isOpen ? 'flex' : 'none';
+        
+        // Cuộn xuống cuối khi mở chat
+        if(isOpen) {
+             const container = document.getElementById('messageContainer');
+             container.scrollTop = container.scrollHeight;
         }
+    }
 
-        // 3. Xử lý gửi tin nhắn
-        function handleEnter(e) {
-            if (e.key === 'Enter') sendMessage();
-        }
+    function handleEnter(e) {
+        if (e.key === 'Enter') sendMessage();
+    }
 
-        async function sendMessage() {
-            const input = document.getElementById('userInput');
-            const msg = input.value.trim();
-            if (!msg) return;
+    async function sendMessage() {
+        const input = document.getElementById('userInput');
+        const msg = input.value.trim();
+        if (!msg) return;
 
-            // Hiển thị tin nhắn người dùng
-            addMessage(msg, 'user');
-            input.value = '';
+        // --- XỬ LÝ USER ---
+        addMessage(msg, 'user');
+        chatHistory.push({ 
+            "role": "user", 
+            "parts": [{"text": msg}] 
+        });
+        // Lưu ngay sau khi user chat
+        localStorage.setItem('chatHistory', JSON.stringify(chatHistory));
 
-            // Hiển thị trạng thái đang gõ
-            const typing = document.getElementById('typingIndicator');
-            typing.style.display = 'block';
+        input.value = '';
+
+        const typing = document.getElementById('typingIndicator');
+        typing.style.display = 'block';
+        
+        const container = document.getElementById('messageContainer');
+        container.scrollTop = container.scrollHeight;
+
+        try {
+            const response = await fetch(API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    message: msg,
+                    history: chatHistory 
+                })
+            });
             
-            // Cuộn xuống cuối
-            const container = document.getElementById('messageContainer');
-            container.scrollTop = container.scrollHeight;
+            const data = await response.json();
+            typing.style.display = 'none';
+            
+            const botReply = data.reply;
 
-            try {
-                // Gọi xuống Backend
-                const response = await fetch(API_URL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ message: msg })
-                });
-                
-                const data = await response.json();
-                typing.style.display = 'none';
-                addMessage(data.reply, 'bot');
+            // --- XỬ LÝ BOT ---
+            addMessage(botReply, 'bot');
+            chatHistory.push({
+                "role": "model",
+                "parts": [{"text": botReply}]
+            });
+            
+            // QUAN TRỌNG: Cập nhật lại localStorage sau khi Bot trả lời
+            localStorage.setItem('chatHistory', JSON.stringify(chatHistory));
 
-            } catch (error) {
-                typing.style.display = 'none';
-                addMessage("Lỗi kết nối server. Hãy chắc chắn bạn đã chạy file backend.py", 'bot');
-            }
+        } catch (error) {
+            typing.style.display = 'none';
+            addMessage("Lỗi kết nối server. Hãy kiểm tra lại API Key hoặc mạng.", 'bot');
         }
+    }
 
-        function addMessage(text, sender) {
-            const container = document.getElementById('messageContainer');
-            const div = document.createElement('div');
-            div.className = `message ${sender}`;
-            div.innerText = text;
-            container.appendChild(div);
-            container.scrollTop = container.scrollHeight;
+    function addMessage(text, sender) {
+        const container = document.getElementById('messageContainer');
+        const div = document.createElement('div');
+        div.className = `message ${sender}`;
+        
+        // Xử lý xuống dòng cho đẹp nếu văn bản dài
+        if (sender === 'bot') {
+            // Nếu là Bot: Dùng marked để chuyển **thành chữ đậm, xuống dòng chuẩn
+            div.innerHTML = marked.parse(text); 
+        } else {
+            // Nếu là Người dùng: Giữ nguyên text để tránh lỗi bảo mật (XSS)
+            div.innerText = text; 
         }
-    </script>
+        
+        container.appendChild(div);
+        container.scrollTop = container.scrollHeight;
+    }
+    
+    // Thêm hàm xóa lịch sử (để bạn test cho dễ)
+    function clearChat() {
+        localStorage.removeItem('chatHistory');
+        location.reload();
+    }
+</script>
     
 </body>
 </html>

@@ -4,10 +4,12 @@ import cloudinary
 from flask_login import LoginManager
 
 
+
 #mail
 from flask_mail import Mail, Message
 import os
 app = Flask(__name__) 
+
 app.secret_key = 'aheafgwagfsadgasfsdfa2673^^8y8621'
 app.config["SQLALCHEMY_DATABASE_URI"] = "mysql+pymysql://root:@localhost/shop_db?charset=utf8mb4"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = True
