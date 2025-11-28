@@ -44,6 +44,23 @@ class Shop(BaseModel):
     lon = Column(Float)
     def __str__(self):
         return self.shop_name
+    
+
+class Comment(BaseModel):
+    content = Column(String(255), nullable=False)
+    created_date = Column(DateTime, default=datetime.now())
+    shop_id = Column(Integer, ForeignKey(Shop.id), nullable=False)
+    user_id = Column(Integer, ForeignKey(User.id), nullable=False)
+    
+    # --- THÊM 2 DÒNG NÀY ---
+    rating = Column(Integer, default=0)  # Lưu số sao (1-5)
+    image = Column(Text)          # Lưu link ảnh Cloudinary
+    
+    user = relationship('User', backref='comments')
+    shop = relationship('Shop', backref='comments')
+
+    def __str__(self):
+        return self.content
 
 
 
@@ -53,34 +70,34 @@ class Shop(BaseModel):
 
 if __name__ == '__main__':
     with app.app_context():
-        db.drop_all() 
+        # db.drop_all() 
         db.create_all()
-        print("Đã tạo bảng dữ liệu mới!")
-        csv_file_path = 'D:\\TL_nam_2\\TDTT\\my_sale_app\\saleapp\\DataMarket.csv' 
-        if os.path.exists(csv_file_path):
-            try:
-                with open(csv_file_path, mode='r', encoding='utf-8-sig') as f:
-                    reader = csv.DictReader(f)
+        # print("Đã tạo bảng dữ liệu mới!")
+        # csv_file_path = 'D:\\TL_nam_2\\TDTT\\my_sale_app\\saleapp\\DataMarket.csv' 
+        # if os.path.exists(csv_file_path):
+        #     try:
+        #         with open(csv_file_path, mode='r', encoding='utf-8-sig') as f:
+        #             reader = csv.DictReader(f)
                     
-                    count = 0
-                    for row in reader:
-                        s = Shop(
-                            shop_name=row['shop_name'],
-                            city=row['city'],
-                            address=row['address'],
-                            items=row['item_name'], 
-                            price=row['price'],
-                            rating=float(row['rating']) if row['rating'] else 0,
-                            category=row['category'],
-                            lat=float(row['lat']) if row['lat'] else 0,
-                            lon=float(row['lon']) if row['lon'] else 0
-                        )
-                        db.session.add(s)
-                        count += 1
+        #             count = 0
+        #             for row in reader:
+        #                 s = Shop(
+        #                     shop_name=row['shop_name'],
+        #                     city=row['city'],
+        #                     address=row['address'],
+        #                     items=row['item_name'], 
+        #                     price=row['price'],
+        #                     rating=float(row['rating']) if row['rating'] else 0,
+        #                     category=row['category'],
+        #                     lat=float(row['lat']) if row['lat'] else 0,
+        #                     lon=float(row['lon']) if row['lon'] else 0
+        #                 )
+        #                 db.session.add(s)
+        #                 count += 1
                     
-                    db.session.commit()
-                    print(f"Thành công! Đã import {count} cửa hàng từ file CSV vào database.")
-            except Exception as ex:
-                print("Lỗi khi đọc file CSV: " + str(ex))
-        else:
-            print(f"Không tìm thấy file '{csv_file_path}'. Vui lòng kiểm tra lại đường dẫn.")
+        #             db.session.commit()
+        #             print(f"Thành công! Đã import {count} cửa hàng từ file CSV vào database.")
+        #     except Exception as ex:
+        #         print("Lỗi khi đọc file CSV: " + str(ex))
+        # else:
+        #     print(f"Không tìm thấy file '{csv_file_path}'. Vui lòng kiểm tra lại đường dẫn.")

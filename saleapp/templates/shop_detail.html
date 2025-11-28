@@ -1,0 +1,140 @@
+{% extends 'layout/base.html' %}
+
+{% block title %}Chi tiết {{ shop.shop_name }}{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-md-5">
+            <img src="{{ url_for('static', filename='images/shop.jpg') }}" class="img-fluid rounded shadow" alt="Shop Image">
+        </div>
+        <div class="col-md-7">
+            <h2 class="text-primary">{{ shop.shop_name }}</h2>
+            <div class="mb-3">
+                <span class="badge badge-warning text-white p-2">{{ shop.rating }} <i class="fas fa-star"></i></span>
+                <span class="badge badge-info p-2">{{ shop.category }}</span>
+            </div>
+            
+            <h4 class="text-danger font-weight-bold">{{ shop.price }}.000 VNĐ</h4>
+            
+            <p><i class="fas fa-map-marker-alt text-success"></i> <b>Địa chỉ:</b> {{ shop.address }}, {{ shop.city }}</p>
+            
+            <p>
+                <b>Sản phẩm kinh doanh:</b><br>
+                {{ shop.items }}
+            </p>
+
+            <button class="btn btn-primary"><i class="fas fa-cart-plus"></i> Đặt hàng ngay</button>
+            <button class="btn btn-outline-danger"><i class="fas fa-heart"></i> Yêu thích</button>
+        </div>
+    </div>
+
+    <hr class="my-5">
+
+    <div class="row">
+        <div class="col-12">
+            <h4 class="mb-4">Bình luận & Đánh giá</h4>
+            
+            {% if current_user.is_authenticated %}
+                <div class="card mb-4 bg-light">
+                    <div class="card-body">
+                        <form action="{{ url_for('shop_detail', shop_id=shop.id) }}" method="post" enctype="multipart/form-data">
+                            
+                            <div class="d-flex mb-3 align-items-center">
+                                <img src="{{ current_user.avatar if current_user.avatar else 'https://via.placeholder.com/50' }}" class="rounded-circle mr-3" width="50" height="50">
+                                <h6 class="mb-0">{{ current_user.name }}</h6>
+                            </div>
+
+                            <div class="form-group">
+                                <label>Đánh giá của bạn:</label>
+                                <div class="rate">
+                                    <input type="radio" id="star5" name="rating" value="5" />
+                                    <label for="star5" title="5 sao">5 stars</label>
+                                    <input type="radio" id="star4" name="rating" value="4" />
+                                    <label for="star4" title="4 sao">4 stars</label>
+                                    <input type="radio" id="star3" name="rating" value="3" />
+                                    <label for="star3" title="3 sao">3 stars</label>
+                                    <input type="radio" id="star2" name="rating" value="2" />
+                                    <label for="star2" title="2 sao">2 stars</label>
+                                    <input type="radio" id="star1" name="rating" value="1" />
+                                    <label for="star1" title="1 sao">1 star</label>
+                                </div>
+                                <div style="clear:both;"></div>
+                            </div>
+
+                            <div class="form-group">
+                                <textarea name="content" class="form-control" rows="3" placeholder="Chia sẻ cảm nhận..." required></textarea>
+                            </div>
+
+                            <div class="form-group">
+                                <label><i class="fas fa-camera"></i> Thêm ảnh minh họa (Tối đa 3 ảnh)</label>
+                                
+                                <input type="file" name="images" id="fileInput" class="form-control-file" multiple accept="image/*" onchange="checkFiles(this)">
+                                <small class="text-muted" id="fileWarning" style="display:none; color: red !important;">Chỉ được chọn tối đa 3 ảnh!</small>
+                            </div>
+
+                            <div class="text-right">
+                                <button type="submit" class="btn btn-success">Gửi đánh giá</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            {% else %}
+            <div class="alert alert-warning">
+                Vui lòng <a href="{{ url_for('user_signin') }}">đăng nhập</a> để viết bình luận.
+            </div>
+            {% endif %}
+
+            <div class="comments-list">
+                {% for c in comments %}
+                <div class="media mb-4 p-3 border rounded shadow-sm bg-white">
+                    <img src="{{ c.user.avatar }}" class="mr-3 rounded-circle" width="50" height="50">
+                    <div class="media-body">
+                        <h6 class="mt-0 font-weight-bold text-info">
+                            {{ c.user.name }}
+                            <span class="text-warning ml-2">
+                                {% for i in range(c.rating) %}<i class="fas fa-star"></i>{% endfor %}
+                                {% for i in range(5 - c.rating) %}<i class="far fa-star"></i>{% endfor %}
+                            </span>
+                            <small class="text-muted float-right">{{ c.created_date.strftime('%d/%m/%Y') }}</small>
+                        </h6>
+                        
+                        <p>{{ c.content }}</p>
+                        
+                        {% if c.image %}
+                            <div class="mt-2 row">
+                                {% for img_url in c.image.split(';') %}
+                                <div class="col-md-4 col-4 mb-2">
+                                    <img src="{{ img_url }}" class="img-fluid rounded border" 
+                                        style="height: 150px; width: 100%; object-fit: cover; cursor: pointer;" 
+                                        onclick="window.open(this.src)">
+                                </div>
+                                {% endfor %}
+                            </div>
+            {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+
+
+
+<script>
+function checkFiles(input) {
+    const maxFiles = 3;
+    const warningText = document.getElementById('fileWarning');
+    const submitBtn = document.querySelector('button[type="submit"]');
+
+    if (input.files.length > maxFiles) {
+        warningText.style.display = 'block';
+        input.value = ''; // Reset lại input nếu chọn quá
+        alert("Bạn chỉ được chọn tối đa " + maxFiles + " ảnh.");
+    } else {
+        warningText.style.display = 'none';
+    }
+}
+</script>
+{% endblock %}
