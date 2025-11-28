@@ -8,6 +8,7 @@ import random
 from datetime import datetime, timedelta
 import os
 from flask_cors import CORS
+from ai_nhandienanh import phan_tich_hinh_anh # Import hàm xử lý ảnh
 
 CORS(app)
 
@@ -331,6 +332,40 @@ def chat():
         return jsonify({'reply': 'Lỗi server, vui lòng kiểm tra console.', 'success': False}), 500
 # --- Chạy Server ---
 
+@app.route('/search-by-image', methods=['GET', 'POST']) 
+def search_by_image():
+    identified_items = [] # Danh sách vật phẩm AI nhìn thấy
+    shops = []            # Danh sách shop bán vật phẩm đó
+    image_url = None      # Link ảnh để hiển thị lại
+
+    if request.method == 'POST':
+        # 1. Lấy file từ frontend
+        file = request.files.get('image')
+        
+        if file:
+            try:
+                # 2. Đưa file lên Cloudinary
+                res = cloudinary.uploader.upload(file)
+                image_url = res['secure_url']
+                print(f"Đã upload ảnh lên: {image_url}")
+
+                # 3. Chạy hàm tìm kiếm bằng hình ảnh (đã viết ở step 1)
+                # Trả về danh sách: VD ['Chai nước', 'Bánh snack']
+                identified_items = phan_tich_hinh_anh(image_url)
+                print(f"AI nhận diện được: {identified_items}")
+
+                # 4. Chạy hàm load từ sql danh sách cửa hàng (đã viết ở step 2)
+                if identified_items:
+                    shops = utils.search_shops_by_items(identified_items)
+            
+            except Exception as e:
+                print(f"Lỗi xử lý tìm kiếm ảnh: {e}")
+    
+    # 5. Đưa kết quả ra frontend
+    return render_template('search.html', 
+                           shops=shops, 
+                           identified_items=identified_items, 
+                           image_url=image_url)
 
 
 

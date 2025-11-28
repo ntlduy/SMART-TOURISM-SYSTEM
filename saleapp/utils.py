@@ -139,3 +139,21 @@ def update_password(user_id, new_password):
 
 
 
+from sqlalchemy import or_
+
+def search_shops_by_items(item_list):
+    """
+    Tìm các shop có chứa ít nhất 1 món trong item_list
+    """
+    if not item_list:
+        return []
+    
+    query = Shop.query
+    filters = []
+    
+    for item in item_list:
+        # Tìm shop có cột items chứa tên sản phẩm (dùng like/contains)
+        filters.append(Shop.items.contains(item))
+    
+    # Dùng OR: chỉ cần shop có bán 1 trong các món là được chọn
+    return query.filter(or_(*filters)).all()

@@ -3,6 +3,65 @@
 {% block title %}Trang chủ{% endblock %}
 {% block content %}
 <h1 class="subject">CHÀO MỪNG CÁC BẠN ĐẾN VỚI WEBSITE</h1>
+
+
+
+ 
+            <div class="card p-3 shadow-sm">
+                <h5 class="text-center mb-3">Bộ lọc</h5>
+                <form action="/" method="get" id="filterForm">
+                    <div class="form-group">
+                        <label>Từ khóa</label>
+                        <input type="text" name="keyword" class="form-control" placeholder="Tên shop, món ăn..." value="{{ request.args.get('keyword', '') }}">
+                    </div>
+
+                    <div class="form-group">
+                        <label>Khu vực</label>
+                        <select name="city" class="form-control">
+                            <option value="all">Tất cả</option>
+                            {% for c in cities %}
+                            <option value="{{ c }}" {% if request.args.get('city') == c %}selected{% endif %}>{{ c }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Giá (VNĐ)</label>
+                        <div class="d-flex">
+                            <input type="number" name="from_price" class="form-control mr-1" placeholder="Từ" value="{{ request.args.get('from_price', '') }}">
+                            <input type="number" name="to_price" class="form-control ml-1" placeholder="Đến" value="{{ request.args.get('to_price', '') }}">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Đánh giá tối thiểu</label>
+                        <input type="number" name="rating" class="form-control" step="0.1" min="0" max="5" placeholder="VD: 4.0" value="{{ request.args.get('rating', '') }}">
+                    </div>
+
+                    <div class="form-group">
+                        <label>Tìm quanh đây (km)</label>
+                        <div class="input-group">
+                            <input type="number" name="radius" class="form-control" placeholder="Bán kính" value="{{ request.args.get('radius', '') }}">
+                            <div class="input-group-append">
+                                <button type="button" class="btn btn-outline-info" onclick="getLocation()">
+                                    <i class="fas fa-map-marker-alt"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <input type="hidden" name="lat" id="lat" value="{{ request.args.get('lat', '') }}">
+                        <input type="hidden" name="lon" id="lon" value="{{ request.args.get('lon', '') }}">
+                    </div>
+
+                    <button type="submit" class="btn btn-primary btn-block">Áp dụng lọc</button>
+                    <a href="/" class="btn btn-outline-secondary btn-block">Xóa bộ lọc</a>
+                </form>
+            </div>
+ 
+
+
+
+
+
     <ul class="pagination justify-content-center mt-4">
         
         {% if current_page > 1 %}
