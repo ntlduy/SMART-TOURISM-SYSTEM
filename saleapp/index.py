@@ -9,10 +9,6 @@ from datetime import datetime, timedelta
 import os
 from search_by_image import phan_tich_hinh_anh 
 
-# --- CÁC ROUTE TRANG TĨNH (About, Challenge...) ---
-# Trong mô hình API, Backend KHÔNG quản lý các trang này.
-# Frontend (React/Vue) sẽ tự định nghĩa Router để hiển thị.
-# Do đó ta XÓA các route: /challenge, /about, /shop, /search (GET)
 
 # --- 1. API SẢN PHẨM & TRANG CHỦ ---
 @app.route("/api/shops", methods=['GET']) 
@@ -36,8 +32,8 @@ def api_get_shops():
         user_lat=user_lat, user_lon=user_lon, radius=radius, page=page
     )
 
-    # Serialize dữ liệu (Dùng hàm to_dict giả định hoặc map thủ công)
-    shops_data = [s.to_dict() for s in shops] # Yêu cầu model Shop có hàm to_dict()
+    # Serialize dữ liệu 
+    shops_data = [s.to_dict() for s in shops] 
     categories = utils.get_all_categories()
 
     cities = utils.get_all_cities()
@@ -65,7 +61,7 @@ def api_shop_detail(shop_id):
     
     return jsonify({
         'shop': shop.to_dict(),
-        'comments': [c.to_dict() for c in comments] # Yêu cầu model Comment có to_dict()
+        'comments': [c.to_dict() for c in comments] 
     })
 
 
@@ -112,7 +108,7 @@ def api_login():
         password = request.form.get('pass')
     else:
         username = data.get('username')
-        password = data.get('password') # Lưu ý frontend gửi key là 'pass' hay 'password'
+        password = data.get('password') # Lưu ý frontend gửi key là 'password'
 
     user = utils.check_login(username=username, password=password)
     if user:

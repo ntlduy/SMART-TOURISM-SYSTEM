@@ -242,7 +242,7 @@ def calculate_distance(lat1, lon1, lat2, lon2):
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
     return R * c
 
-# 2. Hàm load_shops nâng cấp
+# 2. Hàm load_shops
 # Đảm bảo bạn đã import Category ở đầu file
 from models import Shop, City, Category  # <--- Thêm Category vào đây
 
@@ -362,7 +362,7 @@ def add_comment(content, shop_id, user_id, rating=0, images=[]):
     db.session.add(c)
     db.session.commit()
 
-    # 2. (Nâng cao) Tính lại điểm trung bình cho Shop
+    # 2.  Tính lại điểm trung bình cho Shop
     # Lấy trung bình cộng cột rating của các comment thuộc shop này
     avg_rating = db.session.query(func.avg(Comment.rating)).filter(Comment.shop_id == shop_id).scalar()
     
