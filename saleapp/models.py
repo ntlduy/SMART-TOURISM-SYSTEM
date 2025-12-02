@@ -124,8 +124,8 @@ if __name__ == '__main__':
         db.create_all()
         print("Đã cập nhật cấu trúc bảng dữ liệu!")
 
-        # --- LOGIC IMPORT CSV MỚI (Xử lý quan hệ bảng) ---
-        csv_file_path = 'saleapp/dataset.csv' # Cập nhật đúng đường dẫn file của bạn
+        # --- LOGIC IMPORT CSV MỚI  ---
+        csv_file_path = 'saleapp/data.csv' 
         
         if os.path.exists(csv_file_path):
             try:
