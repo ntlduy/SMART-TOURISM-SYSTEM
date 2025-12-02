@@ -1,6 +1,6 @@
 import hashlib
 from __init__ import app, db, mail
-from models import  User, Shop, Comment
+from models import User, Shop, Comment, City, Category
 import random
 from datetime import datetime, timedelta
 from flask_mail import Message
@@ -243,37 +243,46 @@ def calculate_distance(lat1, lon1, lat2, lon2):
     return R * c
 
 # 2. Hàm load_shops nâng cấp
+# Đảm bảo bạn đã import Category ở đầu file
+from models import Shop, City, Category  # <--- Thêm Category vào đây
+
 def load_shops(kw=None, from_price=None, to_price=None, 
-               city=None, min_rating=None, 
+               city=None, category=None,  # <--- Thêm tham số category
+               min_rating=None, 
                user_lat=None, user_lon=None, radius=None, page=1):
     
     query = Shop.query
     
-    # --- Lọc theo Keyword (Tên shop hoặc Vật phẩm) ---
+    # --- 1. Lọc theo Keyword (Tên shop hoặc Vật phẩm) ---
     if kw:
         query = query.filter(or_(
             Shop.shop_name.contains(kw),
             Shop.items.contains(kw)
         ))
     
-    # --- Lọc theo Tỉnh/Thành phố ---
+    # --- 2. Lọc theo Tỉnh/Thành phố ---
     if city and city != 'all':
-        query = query.filter(Shop.city == city)
+        query = query.join(City).filter(City.name == city)
+
+    # --- 3. Lọc theo Category  ---
+    if category and category != 'all':
+        # Join bảng Category và lọc theo tên
+        query = query.join(Category).filter(Category.name == category)
         
-    # --- Lọc theo Giá (Cần ép kiểu String sang Float để so sánh) ---
+    # --- 4. Lọc theo Giá ---
     if from_price:
         query = query.filter(cast(Shop.price, Float) >= float(from_price))
     if to_price:
         query = query.filter(cast(Shop.price, Float) <= float(to_price))
         
-    # --- Lọc theo Rating ---
+    # --- 5. Lọc theo Rating ---
     if min_rating:
         query = query.filter(Shop.rating >= float(min_rating))
 
-    # Lấy toàn bộ dữ liệu thỏa mãn các điều kiện trên (để xử lý khoảng cách)
+    # Lấy toàn bộ dữ liệu thỏa mãn các điều kiện trên
     shops = query.all()
     
-    # --- Lọc theo Khoảng cách (Xử lý bằng Python) ---
+    # --- 6. Lọc theo Khoảng cách (Logic Python) ---
     if user_lat and user_lon and radius:
         try:
             user_lat = float(user_lat)
@@ -282,20 +291,18 @@ def load_shops(kw=None, from_price=None, to_price=None,
             
             filtered_shops = []
             for s in shops:
-                # Tính khoảng cách
                 dist = calculate_distance(user_lat, user_lon, s.lat, s.lon)
-                s.distance = round(dist, 1) # Gán thuộc tính distance để hiển thị
+                s.distance = round(dist, 1)
                 
                 if dist <= radius:
                     filtered_shops.append(s)
             
-            # Sắp xếp theo khoảng cách gần nhất
             shops = sorted(filtered_shops, key=lambda x: x.distance)
             
         except ValueError:
-            pass # Bỏ qua nếu dữ liệu toạ độ lỗi
+            pass 
 
-    # --- Phân trang (Pagination) bằng Python ---
+    # --- 7. Phân trang ---
     total_count = len(shops)
     page_size = app.config['PAGE_SIZE']
     start = (page - 1) * page_size
@@ -304,12 +311,17 @@ def load_shops(kw=None, from_price=None, to_price=None,
     return shops[start:end], total_count
 
 # 3. Hàm lấy danh sách các tỉnh thành (để đổ vào dropdown list)
+
 def get_all_cities():
-    # Lấy các thành phố unique, loại bỏ None
-    cities = db.session.query(Shop.city).distinct().order_by(Shop.city).all()
-    return [c[0] for c in cities if c[0]]
-
-
+    # Lấy toàn bộ danh sách từ bảng City
+    cities = City.query.order_by(City.name).all()
+    # Trả về danh sách tên để hiển thị trên dropdown
+    return [c.name for c in cities]
+# 3. Hàm lấy danh sách category
+def get_all_categories():
+    # Lấy danh sách tên các danh mục từ bảng Category
+    cats = Category.query.order_by(Category.name).all()
+    return [c.name for c in cats]
 
 
 def search_shops_by_items(item_list):

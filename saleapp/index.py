@@ -1,367 +1,280 @@
 from __init__ import app, login
-from flask import render_template, request, redirect, url_for, flash
+from flask import request, jsonify, make_response, render_template
 import utils
 import math
 import cloudinary.uploader
-from flask_login import login_user, logout_user, current_user
+from flask_login import login_user, logout_user, current_user, login_required
 import random
 from datetime import datetime, timedelta
 import os
+from search_by_image import phan_tich_hinh_anh 
 
-from search_by_image import phan_tich_hinh_anh # Import hàm xử lý ảnh
+# --- CÁC ROUTE TRANG TĨNH (About, Challenge...) ---
+# Trong mô hình API, Backend KHÔNG quản lý các trang này.
+# Frontend (React/Vue) sẽ tự định nghĩa Router để hiển thị.
+# Do đó ta XÓA các route: /challenge, /about, /shop, /search (GET)
 
-
-
-
-from flask import Blueprint, request, jsonify, render_template
-
-#mail
-
-from utils import get_user_by_email, generate_and_send_reset_code, verify_reset_code, update_password
-
-
-from google import genai
-
-
-
-
-
-
-@app.route("/") 
-def index():
-
-    # Lấy các tham số từ request (URL)
+# --- 1. API SẢN PHẨM & TRANG CHỦ ---
+@app.route("/api/shops", methods=['GET']) 
+def api_get_shops():
+    # Lấy tham số
     kw = request.args.get('keyword')
     page = request.args.get('page', 1, type=int)
-    
     from_price = request.args.get('from_price')
     to_price = request.args.get('to_price')
     city = request.args.get('city')
+    category = request.args.get('category')
     min_rating = request.args.get('rating')
-    
-    # Tham số vị trí (nếu user cho phép lấy location)
     user_lat = request.args.get('lat')
     user_lon = request.args.get('lon')
-    radius = request.args.get('radius') # Bán kính tìm kiếm (km)
+    radius = request.args.get('radius')
 
-    # page = request.args.get('page', 1)
-
-
-    # Gọi hàm load_shops (trả về cả danh sách shop và tổng số lượng)
-    shops, counter = utils.load_shops(
-        kw=kw, 
-        from_price=from_price, 
-        to_price=to_price,
-        city=city,
-        min_rating=min_rating,
-        user_lat=user_lat,
-        user_lon=user_lon,
-        radius=radius,
-        page=page
+    # Gọi utils xử lý
+    shops, total_count = utils.load_shops(
+        kw=kw, from_price=from_price, to_price=to_price,
+        city=city,category=category, min_rating=min_rating,
+        user_lat=user_lat, user_lon=user_lon, radius=radius, page=page
     )
 
-    # Lấy danh sách thành phố để hiển thị trong Filter
+    # Serialize dữ liệu (Dùng hàm to_dict giả định hoặc map thủ công)
+    shops_data = [s.to_dict() for s in shops] # Yêu cầu model Shop có hàm to_dict()
+    categories = utils.get_all_categories()
+
     cities = utils.get_all_cities()
-    counter = utils.count_shops()
+
+    return jsonify({
+        'data': shops_data,
+        'pagination': {
+            'current_page': page,
+            'total_pages': math.ceil(total_count / app.config['PAGE_SIZE']),
+            'total_count': total_count
+        },
+        'filters': {
+            'cities': cities,
+            'categories': categories
+        }
+    })
+
+@app.route('/api/shops/<int:shop_id>', methods=['GET'])
+def api_shop_detail(shop_id):
+    shop = utils.get_shop_by_id(shop_id)
+    if not shop:
+        return jsonify({'error': 'Không tìm thấy cửa hàng'}), 404
+        
+    comments = utils.get_comments(shop_id)
+    
+    return jsonify({
+        'shop': shop.to_dict(),
+        'comments': [c.to_dict() for c in comments] # Yêu cầu model Comment có to_dict()
+    })
 
 
-    return render_template('index.html', 
-                        shops=shops,
-                        pages=math.ceil(counter/app.config['PAGE_SIZE']),
-                        current_page=page,
-                        cities=cities,
-                        # Truyền lại các tham số để giữ trạng thái form
-                        request=request)
+# --- 2. API AUTH (Đăng ký, Đăng nhập, Đăng xuất) ---
 
+@app.route('/api/register', methods=['POST'])
+def api_register():
+    # API nhận dữ liệu từ JSON hoặc Form-data
+    # Nếu client gửi JSON: data = request.get_json()
+    # Nếu client gửi Form (multipart): dùng request.form
+    
+    name = request.form.get('name')
+    username = request.form.get('username')
+    password = request.form.get('pass')
+    email = request.form.get('email')
+    confirm = request.form.get('confirm')
+    avatar = request.files.get('avatar')
 
+    if not username or not password:
+        return jsonify({'error': 'Vui lòng nhập đầy đủ thông tin'}), 400
 
-@app.route('/challenge')
-def challenge():
-    return render_template('challenge.html')
+    if password.strip() != confirm.strip():
+        return jsonify({'error': 'Mật khẩu xác nhận không khớp'}), 400
 
-@app.route('/about')
-def about():
-    return render_template('about.html')
-
-@app.route('/shop')
-def shop():
-    return render_template('shop.html')
-
-
-@app.route('/search')
-def search():
-    return render_template('search.html')
-
-
-@app.route('/register', methods=['get', 'post'])
-def user_register():
-    err_msg =""
-    if request.method.__eq__('POST'):
-        name = request.form.get('name')
-        username = request.form.get('username')
-        password = request.form.get('pass')
-        email = request.form.get('email')
-        confirm = request.form.get('confirm')
+    try:
         avatar_path = None
-
-        try:
-            if password.strip().__eq__(confirm.strip()):               
-                avatar = request.files.get('avatar')
-                if avatar:
-                    res = cloudinary.uploader.upload(avatar)
-                    avatar_path = res['secure_url']
-                utils.add_user(name=name, username=username, password=password, email=email,
-                                avatar=avatar_path)
-                return redirect(url_for('user_signin'))
-            else:   
-                err_msg = "Mat Khau Khong Hop Le"
-
-        except Exception as ex:
-            err_msg ="he thong co loi: " + str(ex)
- 
+        if avatar:
+            res = cloudinary.uploader.upload(avatar)
+            avatar_path = res['secure_url']
             
+        utils.add_user(name=name, username=username, password=password, email=email, avatar=avatar_path)
+        return jsonify({'message': 'Đăng ký thành công', 'success': True}), 201
+        
+    except Exception as ex:
+        return jsonify({'error': str(ex), 'success': False}), 500
 
-    return render_template('register.html', err_msg=err_msg)
 
-
-@app.route('/user-login', methods=['get', 'post'])
-def user_signin() :
-    err_msg = ''
-    if request.method.__eq__('POST') :
+@app.route('/api/login', methods=['POST'])
+def api_login():
+    # Nhận JSON
+    data = request.get_json()
+    if not data: # Fallback nếu gửi form data
         username = request.form.get('username')
         password = request.form.get('pass')
+    else:
+        username = data.get('username')
+        password = data.get('password') # Lưu ý frontend gửi key là 'pass' hay 'password'
 
-        user = utils.check_login(username=username, password=password)
-        if user :
-            login_user(user=user)
-            return redirect(url_for('index'))
-        else:
-            err_msg="usernam or password KHONG chinh xac"
-    return render_template('login.html', err_msg = err_msg)
+    user = utils.check_login(username=username, password=password)
+    if user:
+        login_user(user=user)
+        # Quan trọng: Trả về thông tin user để Frontend lưu (ví dụ vào LocalStorage/Context)
+        return jsonify({
+            'message': 'Đăng nhập thành công',
+            'user': user.to_dict(),
+            'success': True
+        })
+    
+    return jsonify({'error': 'Sai tên đăng nhập hoặc mật khẩu', 'success': False}), 401
 
-@app.route('/user-logout')
-def user_signout() :
+
+@app.route('/api/logout', methods=['POST'])
+def api_logout():
     logout_user()
-    return redirect(url_for('user_signin'))
+    return jsonify({'message': 'Đăng xuất thành công'})
+
+@app.route("/api/current-user")
+def api_get_current_user():
+    if current_user.is_authenticated:
+        return jsonify({'user': current_user.to_dict(), 'is_authenticated': True})
+    return jsonify({'user': None, 'is_authenticated': False})
 
 
-# @app.context_processor
-# def common_response():
-#     return {
-#         'categories': utils.load_categories()
-#     }
+# --- 3. API TÍNH NĂNG (Comment, Chat, Search Image) ---
 
-@login.user_loader
-def user_load(user_id) :
-    return utils.get_user_by_id(user_id=user_id)
+@app.route('/api/shops/<int:shop_id>/comments', methods=['POST'])
+@login_required # Chặn nếu chưa đăng nhập
+def api_add_comment(shop_id):
+    try:
+        content = request.form.get('content')
+        rating = request.form.get('rating', type=int)
+        files = request.files.getlist('images')
 
+        if len(files) > 3:
+             return jsonify({'error': 'Tối đa 3 ảnh'}), 400
 
+        uploaded_urls = []
+        for file in files:
+            if file and file.filename:
+                res = cloudinary.uploader.upload(file)
+                uploaded_urls.append(res['secure_url'])
 
-
-@app.route("/info-user")
-def info_user():
-    return render_template("infouser.html")
-
-#mail
-
-@app.route('/forgot-password', methods=['GET', 'POST'])
-def forgot_password():
-    if request.method == 'POST':
-        email = request.form.get('email')
-        user = get_user_by_email(email)
+        # Lưu comment
+        new_comment = utils.add_comment(content=content, shop_id=shop_id, 
+                                        user_id=current_user.id, rating=rating, images=uploaded_urls)
         
-        
+        return jsonify({
+            'message': 'Đánh giá thành công',
+            'comment': new_comment.to_dict()
+        })
+    except Exception as ex:
+        return jsonify({'error': str(ex)}), 500
 
 
-
-
-        if user:
-            if generate_and_send_reset_code(user.id):
-                flash('Mã xác nhận đã được gửi đến email của bạn. Vui lòng kiểm tra hộp thư.', 'info')
-                # Chuyển hướng đến trang nhập mã xác nhận
-                return redirect(url_for('verify_code_page', user_id=user.id))
-            else:
-                flash('Lỗi khi gửi email xác nhận. Vui lòng thử lại sau.', 'danger')
-        else:
-            flash('Không tìm thấy tài khoản nào với địa chỉ email này.', 'danger')
-            
-    # Giả sử bạn có template 'forgot_password.html'
-    return render_template('forgot_password.html')
-
-# Route trung gian để hiển thị form nhập mã
-
-@app.route('/verify-code-page/<int:user_id>', methods=['GET'])
-def verify_code_page(user_id):
-    # Dùng GET để chuyển user_id qua. Form POST sẽ gọi route xác minh thực sự.
-    return render_template('verify_code.html', user_id=user_id)
-
-@app.route('/reset-password', methods=['POST'])
-def reset_password():
-    user_id = request.form.get('user_id')
-    code = request.form.get('reset_code')
-    new_password = request.form.get('new_password')
-    confirm_password = request.form.get('confirm_password')
-    
-    # 2a. Kiểm tra mã xác nhận
-    if not verify_reset_code(user_id, code):
-        flash('Mã xác nhận không hợp lệ hoặc đã hết hạn.', 'danger')
-        return redirect(url_for('verify_code_page', user_id=user_id))
-    
-    # 2b. Kiểm tra mật khẩu mới
-    if new_password != confirm_password:
-        flash('Mật khẩu mới và xác nhận mật khẩu không khớp.', 'danger')
-        return render_template('new_password.html', user_id=user_id, code=code) # Giữ lại form
-        
-    if update_password(user_id, new_password):
-        flash('Thay đổi mật khẩu thành công! Vui lòng đăng nhập lại.', 'success')
-        # Chuyển hướng về trang đăng nhập
-        return redirect(url_for('user_signin'))
-    else:
-        flash('Lỗi khi cập nhật mật khẩu. Vui lòng thử lại.', 'danger')
-        return redirect(url_for('verify_code_page', user_id=user_id))
-    
-# Route để hiển thị form nhập mật khẩu mới (sau khi mã được nhập)
-@app.route('/new-password-form', methods=['POST'])
-def new_password_form():
-    user_id = request.form.get('user_id')
-    code = request.form.get('reset_code')
-    
-    if verify_reset_code(user_id, code):
-        # Giả sử bạn có template 'new_password.html'
-        # Chuyển user_id và code ẩn qua form để POST lên /reset-password
-        return render_template('new_password.html', user_id=user_id, code=code)
-    else:
-        flash('Mã xác nhận không hợp lệ hoặc đã hết hạn.', 'danger')
-        return redirect(url_for('verify_code_page', user_id=user_id))
-
-
-
-
-
-
-# --- Route Chat AI mới ---
-
-
-
-# --- API Endpoint ---
-@app.route('/chat', methods=['POST'])
-def chat():
-    """
-    Endpoint nhận tin nhắn từ frontend và trả về phản hồi của AI.
-    """
+@app.route('/api/chat', methods=['POST'])
+def api_chat():
     try:
         data = request.get_json()
         user_message = data.get('message', '')
-        
-        # 1. THÊM VIỆC LẤY LỊCH SỬ CHAT TỪ REQUEST
         chat_history = data.get('history', []) 
         
         if not user_message:
             return jsonify({'reply': 'Vui lòng gửi tin nhắn.', 'success': False}), 400
 
-        # 2. TRUYỀN THÊM LỊCH SỬ CHAT VÀO HÀM UTILS
-        # Hàm utils.get_gemini_response trong file utils.py cần được cập nhật
-        # để chấp nhận tham số chat_history
         ai_reply = utils.get_gemini_response(user_message, chat_history=chat_history)
-
         return jsonify({'reply': ai_reply, 'success': True})
 
     except Exception as e:
-        # In lỗi cụ thể ra console server để debug
-        print(f"Lỗi xảy ra trong quá trình xử lý chat: {e}")
-        return jsonify({'reply': 'Lỗi server, vui lòng kiểm tra console.', 'success': False}), 500
-# --- Chạy Server ---
+        print(f"Chat Error: {e}")
+        return jsonify({'reply': 'Lỗi server', 'success': False}), 500
 
-@app.route('/search-by-image', methods=['GET', 'POST']) 
-def search_by_image():
-    identified_items = [] # Danh sách vật phẩm AI nhìn thấy
-    shops = []            # Danh sách shop bán vật phẩm đó
-    image_url = None      # Link ảnh để hiển thị lại
 
-    if request.method == 'POST':
-        # 1. Lấy file từ frontend
-        file = request.files.get('image')
+@app.route('/api/search-by-image', methods=['POST'])
+def api_search_by_image():
+    file = request.files.get('image')
+    if not file:
+        return jsonify({'error': 'Chưa gửi ảnh'}), 400
         
-        if file:
-            try:
-                # 2. Đưa file lên Cloudinary
-                res = cloudinary.uploader.upload(file)
-                image_url = res['secure_url']
-                print(f"Đã upload ảnh lên: {image_url}")
+    try:
+        res = cloudinary.uploader.upload(file)
+        image_url = res['secure_url']
 
-                # 3. Chạy hàm tìm kiếm bằng hình ảnh (đã viết ở step 1)
-                # Trả về danh sách: VD ['Chai nước', 'Bánh snack']
-                identified_items = phan_tich_hinh_anh(image_url)
-                print(f"AI nhận diện được: {identified_items}")
+        identified_items = phan_tich_hinh_anh(image_url)
+        shops = []
+        if identified_items:
+            shops_list = utils.search_shops_by_items(identified_items)
+            # Serialize danh sách shop
+            shops = [s.to_dict() for s in shops_list]
 
-                # 4. Chạy hàm load từ sql danh sách cửa hàng (đã viết ở step 2)
-                if identified_items:
-                    shops = utils.search_shops_by_items(identified_items)
-            
-            except Exception as e:
-                print(f"Lỗi xử lý tìm kiếm ảnh: {e}")
+        return jsonify({
+            'identified_items': identified_items,
+            'image_url': image_url,
+            'shops': shops
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# --- 4. API QUÊN MẬT KHẨU ---
+
+@app.route('/api/forgot-password', methods=['POST'])
+def api_forgot_password():
+    email = request.form.get('email') # Hoặc json
+    if not email:
+        data = request.get_json()
+        email = data.get('email')
+
+    user = utils.get_user_by_email(email)
+    if user:
+        if utils.generate_and_send_reset_code(user.id):
+             # Trả về user_id để client dùng cho bước tiếp theo
+            return jsonify({'message': 'Đã gửi mã xác nhận', 'user_id': user.id, 'success': True})
+        return jsonify({'error': 'Lỗi gửi mail', 'success': False}), 500
     
-    # 5. Đưa kết quả ra frontend
-    return render_template('search.html', 
-                           shops=shops, 
-                           identified_items=identified_items, 
-                           image_url=image_url)
+    return jsonify({'error': 'Email không tồn tại', 'success': False}), 404
 
+@app.route('/api/verify-code', methods=['POST'])
+def api_verify_code():
+    # Gom gọn việc kiểm tra mã vào 1 API
+    data = request.get_json()
+    user_id = data.get('user_id')
+    code = data.get('reset_code')
 
+    if utils.verify_reset_code(user_id, code):
+        return jsonify({'message': 'Mã hợp lệ', 'valid': True})
+    return jsonify({'error': 'Mã sai hoặc hết hạn', 'valid': False}), 400
 
-
-
-# Trong saleapp/index.py
-
-@app.route('/shop-detail/<int:shop_id>', methods=['GET', 'POST'])
-def shop_detail(shop_id):
-    shop = utils.get_shop_by_id(shop_id)
+@app.route('/api/reset-password', methods=['POST'])
+def api_reset_password():
+    data = request.get_json()
+    user_id = data.get('user_id')
+    code = data.get('reset_code') # Kiểm tra lại lần nữa cho chắc
+    new_password = data.get('new_password')
     
-    if request.method == 'POST':
-        if current_user.is_authenticated:
-            try:
-                content = request.form.get('content')
-                rating = request.form.get('rating', type=int)
-                
-                # 1. Lấy danh sách các file ảnh được upload
-                files = request.files.getlist('images')
-                
-                # 2. Kiểm tra số lượng ảnh (Tối đa 3)
-                if len(files) > 3:
-                    flash('Bạn chỉ được đăng tối đa 3 ảnh!', 'danger')
-                    return redirect(url_for('shop_detail', shop_id=shop_id))
+    # Logic kiểm tra code lần 2 (bảo mật)
+    if not utils.verify_reset_code(user_id, code):
+        return jsonify({'error': 'Mã phiên làm việc hết hạn'}), 400
+        
+    if utils.update_password(user_id, new_password):
+        return jsonify({'message': 'Đổi mật khẩu thành công', 'success': True})
+    
+    return jsonify({'error': 'Lỗi cập nhật', 'success': False}), 500
 
-                uploaded_urls = []
-                for file in files:
-                    # Kiểm tra xem file có tên không (tránh trường hợp input rỗng)
-                    if file and file.filename:
-                        res = cloudinary.uploader.upload(file)
-                        uploaded_urls.append(res['secure_url'])
+# --- User Loader ---
+@login.user_loader
+def user_load(user_id):
+    return utils.get_user_by_id(user_id=user_id)
 
-                # 3. Gọi hàm lưu với danh sách URL
-                utils.add_comment(content=content, shop_id=shop_id, user_id=current_user.id, 
-                                  rating=rating, images=uploaded_urls)
-                
-                flash('Đánh giá thành công!', 'success')
-            except Exception as ex:
-                flash(f'Lỗi hệ thống: {ex}', 'danger')
-                
-            return redirect(url_for('shop_detail', shop_id=shop_id))
-        else:
-            return redirect(url_for('user_signin'))
-
-    comments = utils.get_comments(shop_id)
-    return render_template('shop_detail.html', shop=shop, comments=comments)
-
-
-
+# --- ROUTE TEST (Thêm vào index.py) ---
+from flask import render_template
 
 
 if __name__ == '__main__':
-    from admin import *
+    # Lưu ý: file admin.py có thể sẽ cần chỉnh sửa nếu nó phụ thuộc vào template
+    # try:
+    #     from admin import * except:
+    #     pass 
 
     if not os.getenv("GEMINI_API_KEY"):
-        print("CẢNH BÁO: Biến môi trường GEMINI_API_KEY chưa được thiết lập!")
-        print("Chatbot sẽ không hoạt động với Gemini.")
+        print("CẢNH BÁO: Chưa có key Gemini")
+        
     app.run(debug=True)
-
