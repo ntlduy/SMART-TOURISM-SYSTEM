@@ -1,0 +1,190 @@
+{% extends 'layout/base.html' %}
+
+{% block title %}Trang chủ{% endblock %}
+{% block content %}
+<h1 class="subject">CHÀO MỪNG CÁC BẠN ĐẾN VỚI WEBSITE</h1>
+
+
+
+    <div class="text-right">
+        <button class="btn btn-info" type="button" data-toggle="collapse" data-target="#filterPanel" aria-expanded="false"
+            aria-controls="filterPanel">
+            <i class="fas fa-filter"></i> Bộ lọc tìm kiếm
+        </button>
+    </div>
+    <div class="collapse mt-2" id="filterPanel">
+        <div class="card p-3 shadow-sm">
+            <h5 class="text-center mb-3">Bộ lọc</h5>
+            <form action="/" method="get" id="filterForm">
+                <div class="form-group">
+                    <label>Từ khóa</label>
+                    <input type="text" name="keyword" class="form-control" placeholder="Tên shop, món ăn..."
+                        value="{{ request.args.get('keyword', '') }}">
+                </div>
+
+                <div class="form-group">
+                    <label>Khu vực</label>
+                    <select name="city" class="form-control">
+                        <option value="all">Tất cả</option>
+                        {% for c in cities %}
+                        <option value="{{ c }}" {% if request.args.get('city')==c %}selected{% endif %}>{{ c }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>Giá (VNĐ)</label>
+                    <div class="d-flex">
+                        <input type="number" name="from_price" class="form-control mr-1" placeholder="Từ"
+                            value="{{ request.args.get('from_price', '') }}">
+                        <input type="number" name="to_price" class="form-control ml-1" placeholder="Đến"
+                            value="{{ request.args.get('to_price', '') }}">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Đánh giá tối thiểu</label>
+                    <input type="number" name="rating" class="form-control" step="0.1" min="0" max="5" placeholder="VD: 4.0"
+                        value="{{ request.args.get('rating', '') }}">
+                </div>
+
+                <div class="form-group">
+                    <label>Tìm quanh đây (km)</label>
+                    <div class="input-group">
+                        <input type="number" name="radius" class="form-control" placeholder="Bán kính"
+                            value="{{ request.args.get('radius', '') }}">
+                        <div class="input-group-append">
+                            <button type="button" class="btn btn-outline-info" onclick="getLocation()">
+                                <i class="fas fa-map-marker-alt"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <input type="hidden" name="lat" id="lat" value="{{ request.args.get('lat', '') }}">
+                    <input type="hidden" name="lon" id="lon" value="{{ request.args.get('lon', '') }}">
+                </div>
+
+                <button type="submit" class="btn btn-primary btn-block">Áp dụng lọc</button>
+                <a href="/" class="btn btn-outline-secondary btn-block">Xóa bộ lọc</a>
+            </form>
+        </div>
+    </div>
+
+
+
+
+
+
+
+<ul class="pagination justify-content-center mt-4">
+
+    {% if current_page > 1 %}
+    <li class="page-item">
+        <a class="page-link"
+            href="{{ url_for('index', page=current_page-1, keyword=request.args.get('keyword'), city=request.args.get('city'), from_price=request.args.get('from_price'), rating=request.args.get('rating')) }}">Trước</a>
+    </li>
+    {% endif %}
+
+    {% set start_page = current_page - 2 %}
+    {% set end_page = current_page + 2 %}
+
+    {% if start_page < 1 %} {% set start_page=1 %} {% set end_page=5 %} {% endif %} {% if end_page> pages %}
+        {% set end_page = pages %}
+        {% set start_page = pages - 4 %}
+        {% if start_page < 1 %}{% set start_page=1 %}{% endif %} {% endif %} {% for idx in range(start_page, end_page +
+            1) %} <li class="page-item {% if idx == current_page %}active{% endif %}">
+            <a class="page-link"
+                href="{{ url_for('index', page=idx, keyword=request.args.get('keyword'), city=request.args.get('city'), from_price=request.args.get('from_price'), rating=request.args.get('rating')) }}">{{
+                idx }}</a>
+
+            </li>
+            {% endfor %}
+
+            {% if current_page < pages %} <li class="page-item">
+                <a class="page-link"
+                    href="{{ url_for('index', page=current_page+1, keyword=request.args.get('keyword'), city=request.args.get('city'), from_price=request.args.get('from_price'), rating=request.args.get('rating')) }}">Sau</a>
+                </li>
+                {% endif %}
+
+</ul>
+
+{% if shops %}
+<div class="row">
+    {% for s in shops %}
+    <div class="col-md-3 col-sm-6 mb-4">
+        <div class="card h-100 shadow-sm">
+            <img src="{{ url_for('static', filename='images/shop.jpg') }}" class="card-img-top" alt="Shop Image"
+                style="height: 180px; object-fit: cover;">
+
+            <div class="card-body d-flex flex-column">
+                <h5 class="card-title text-truncate" title="{{ s.shop_name }}">{{ s.shop_name }}</h5>
+
+                <p class="card-text text-danger font-weight-bold">{{ s.price  }}.000 VNĐ</p>
+
+                <p class="card-text small text-muted mb-1">
+                    <i class="fas fa-map-marker-alt"></i> {{ s.address }}
+                </p>
+
+                <div class="mb-2">
+                    <span class="badge badge-warning text-white">{{ s.rating }} <i class="fas fa-star small"></i></span>
+                    <span class="badge badge-info">{{ s.category }}</span>
+                </div>
+
+                <p class="card-text small text-secondary" style="font-size: 12px;">
+                    <i>Bán: {{ s.items[:50] }}...</i>
+                </p>
+
+                <a href="{{ url_for('shop_detail', shop_id=s.id) }}" class="btn btn-outline-primary btn-sm mt-auto">Xem chi tiết</a>
+            </div>
+        </div>
+    </div>
+
+    {% endfor %}
+
+</div>
+{% else %}
+<p class="text-center"><i>Không có sản phẩm nào</i></p>
+{% endif %}
+<script>
+    function getLocation() {
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(showPosition, showError);
+        } else {
+            alert("Trình duyệt này không hỗ trợ định vị.");
+        }
+    }
+
+    function showPosition(position) {
+        document.getElementById("lat").value = position.coords.latitude;
+        document.getElementById("lon").value = position.coords.longitude;
+        alert("Đã lấy được vị trí của bạn! Hãy nhấn 'Áp dụng lọc'.");
+    }
+
+    function showError(error) {
+        switch (error.code) {
+            case error.PERMISSION_DENIED:
+                alert("Bạn đã từ chối cấp quyền vị trí.");
+                break;
+            case error.POSITION_UNAVAILABLE:
+                alert("Thông tin vị trí không khả dụng.");
+                break;
+            case error.TIMEOUT:
+                alert("Hết thời gian yêu cầu vị trí.");
+                break;
+            case error.UNKNOWN_ERROR:
+                alert("Lỗi không xác định.");
+                break;
+        }
+    }
+    // Tự động mở bộ lọc nếu người dùng đang thực hiện lọc (có param trên URL)
+    window.onload = function () {
+        const urlParams = new URLSearchParams(window.location.search);
+        // Kiểm tra nếu có bất kỳ tham số lọc nào thì mở bảng ra
+        if (urlParams.has('keyword') || urlParams.has('city') || urlParams.has('from_price') || urlParams.has('radius')) {
+            // Sử dụng jQuery (Bootstrap 4) để mở collapse
+            if (typeof $ !== 'undefined') {
+                $('#filterPanel').collapse('show');
+            }
+        }
+    };
+</script>
+{% endblock %}

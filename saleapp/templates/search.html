@@ -1,0 +1,65 @@
+{% extends 'layout/base.html' %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2 class="text-center mb-4">Tìm kiếm sản phẩm bằng hình ảnh</h2>
+    
+    <div class="row justify-content-center">
+        <div class="col-md-6">
+            <form action="{{ url_for('search_by_image') }}" method="post" enctype="multipart/form-data" class="p-4 border rounded shadow-sm bg-white">
+                <div class="form-group text-center">
+                    <label for="imageUpload" class="font-weight-bold">Chọn ảnh sản phẩm bạn muốn tìm:</label>
+                    <input type="file" name="image" id="imageUpload" class="form-control-file mt-2" accept="image/*" required>
+                </div>
+                <div class="text-center mt-3">
+                    <button type="submit" class="btn btn-primary px-4"><i class="fas fa-search"></i> Phân tích & Tìm kiếm</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    {% if image_url %}
+    <div class="row mt-5">
+        <div class="col-md-4 text-center">
+            <h5>Ảnh bạn đã tải lên:</h5>
+            <img src="{{ image_url }}" class="img-fluid rounded shadow-sm" style="max-height: 250px;">
+        </div>
+        <div class="col-md-8">
+            <h5>AI đã tìm thấy các món sau:</h5>
+            {% if identified_items %}
+                <div class="mb-3">
+                    {% for item in identified_items %}
+                        <span class="badge badge-success p-2 mr-2" style="font-size: 1rem;">{{ item }}</span>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p class="text-danger">Không nhận diện được sản phẩm nào trong kho hàng.</p>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    {% if shops %}
+    <h3 class="mt-5 mb-3 border-bottom pb-2">Cửa hàng có bán sản phẩm này</h3>
+    <div class="row">
+        {% for s in shops %}
+        <div class="col-md-3 col-sm-6 mb-4">
+            <div class="card h-100 shadow-sm">
+                <img src="{{ url_for('static', filename='images/shop.jpg') }}" class="card-img-top" alt="{{ s.shop_name }}">
+                <div class="card-body">
+                    <h5 class="card-title text-truncate">{{ s.shop_name }}</h5>
+                    <p class="card-text small text-muted"><i class="fas fa-map-marker-alt"></i> {{ s.address }}</p>
+                    <p class="card-text text-success font-weight-bold">{{ s.price }}</p>
+                    <a href="#" class="btn btn-sm btn-outline-primary btn-block">Xem chi tiết</a>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% elif image_url and not shops and identified_items %}
+        <div class="alert alert-warning mt-4 text-center">
+            Rất tiếc, chưa tìm thấy cửa hàng nào bán các sản phẩm trên.
+        </div>
+    {% endif %}
+</div>
+{% endblock %}

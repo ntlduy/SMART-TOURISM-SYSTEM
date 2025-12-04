@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>
+        {% block title %}{% endblock %}
+    </title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css" integrity="sha384-xOolHFLEh07PJGoPkLv1IbcEPTNtaed2xpHsD9ESMhqIYd0nLMwNLD69Npy4HI+N" crossorigin="anonymous">
+    <script src="https://cdn.jsdelivr.net/npm/jquery@3.5.1/dist/jquery.slim.min.js" integrity="sha384-DfXdz2htPH0lsSSs5nCTpuj/zy4C+OGpamoFVy38MVBnE+IbbVYUew+OrCXaRkfj" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js" integrity="sha384-9/reFTGAW83EW2RDu2S0VKaIzap3H66lZH81PoYlFhbGU+6BZp6G7niu735Sk7lN" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/js/bootstrap.min.js" integrity="sha384-+sLIOodYLS7CIrQpBjl+C7nPvqq+FbNUBDunl/OZv93DB7Ln/533i8e/mZXLi/P+" crossorigin="anonymous"></script>
+    <link href="{{url_for('static', filename='css/stype.css')}}" rel="stylesheet"/>
+    {% block css %}{% endblock %}
+    {% block js %}{%endblock %}
+    <style>
+        /* --- CSS CHO GIAO DIỆN --- */
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f4f9; }
+
+        /* 1. Nút Chat (Hình vuông góc trái) */
+        .chat-launcher {
+            position: fixed;
+            bottom: 20px;
+            left: 20px; /* Theo yêu cầu: Góc trái */
+            width: 60px;
+            height: 60px;
+            background-color: #FF6B6B; /* Màu nổi bật */
+            color: white;
+            border-radius: 12px; /* Bo góc nhẹ để thành hình vuông mềm */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            transition: transform 0.3s;
+            z-index: 1000;
+            font-size: 24px;
+        }
+        .chat-launcher:hover { transform: scale(1.1); }
+
+        /* 2. Khung Chat Box */
+        .chat-window {
+            position: fixed;
+            bottom: 90px;
+            left: 20px; /* Theo yêu cầu: Góc trái */
+            width: 350px;
+            height: 500px;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 5px 30px rgba(0,0,0,0.15);
+            display: none; /* Mặc định ẩn */
+            flex-direction: column;
+            overflow: hidden;
+            z-index: 1000;
+            border: 1px solid #eee;
+        }
+
+        /* Header */
+        .chat-header {
+            background: #FF6B6B;
+            color: white;
+            padding: 15px;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        /* Vùng tin nhắn */
+        .chat-messages {
+            flex: 1;
+            padding: 15px;
+            overflow-y: auto;
+            background: #fff;
+        }
+
+        /* Tin nhắn */
+        .message { margin-bottom: 10px; max-width: 80%; line-height: 1.4; font-size: 14px;}
+        .message.user { margin-left: auto; background: #eee; padding: 10px; border-radius: 15px 15px 0 15px; color: #333; }
+        .message.bot { margin-right: auto; background: #FFF0F0; padding: 10px; border-radius: 15px 15px 15px 0; border: 1px solid #FFD1D1; color: #333; }
+
+        /* 3. Gợi ý (Suggestion Chips) */
+        .suggestion-area {
+            padding: 10px;
+            display: flex;
+            gap: 8px;
+            overflow-x: auto;
+            white-space: nowrap;
+            background: #f9f9f9;
+            border-bottom: 1px solid #eee;
+        }
+        .chip {
+            background: white;
+            border: 1px solid #FF6B6B;
+            color: #FF6B6B;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .chip:hover { background: #FF6B6B; color: white; }
+
+        /* Vùng nhập liệu */
+        .input-area {
+            display: flex;
+            padding: 10px;
+            border-top: 1px solid #eee;
+        }
+        input { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 20px; outline: none; }
+        button.send-btn {
+            background: #FF6B6B; color: white; border: none;
+            padding: 0 15px; margin-left: 10px; border-radius: 20px; cursor: pointer;
+        }
+        
+        /* Loading animation */
+        .typing { font-style: italic; color: #888; font-size: 12px; margin-bottom: 10px; display: none;}
+
+    </style>
+
+</head>
+<body>
+    {% block header %}
+        {% include 'layout/header.html' %}
+    {% endblock%}
+
+
+    <div class = "container">
+
+                {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+
+
+        {% block content %}{%endblock%}
+    </div>
+
+
+    
+    {%block footer%}
+        {% include 'layout/footer.html' %}
+    {%endblock%}
+
+
+
+<div class="chat-launcher" onclick="toggleChat()">
+        💬
+    </div>
+
+    <div class="chat-window" id="chatWindow">
+        <div class="chat-header">
+            <span>🎁 Souvenir Expert AI</span>
+            <span style="cursor:pointer" onclick="toggleChat()">✕</span>
+        </div>
+
+        <div class="chat-messages" id="messageContainer">
+            <div class="message bot">Xin chào! Tôi là trợ lý chuyên về quà lưu niệm. Tôi có thể giúp gì cho bạn?</div>
+        </div>
+        
+        <div class="typing" id="typingIndicator" style="padding-left: 15px;">AI đang soạn tin...</div>
+
+        <div class="suggestion-area" id="suggestionArea">
+            </div>
+
+        <div class="input-area">
+            <input type="text" id="userInput" placeholder="Hỏi về quà, chợ..." onkeypress="handleEnter(event)">
+            <button class="send-btn" onclick="sendMessage()">Gửi</button>
+        </div>
+    </div>
+
+
+
+
+<script>
+    const API_URL = "/chat";
+
+    // 1. LẤY DỮ LIỆU TỪ LOCAL STORAGE HOẶC KHỞI TẠO MẶC ĐỊNH
+    let chatHistory = JSON.parse(localStorage.getItem('chatHistory')) || [{
+        "role": "model",
+        "parts": [{"text": "Xin chào! Tôi là trợ lý chuyên về quà lưu niệm. Tôi có thể giúp gì cho bạn?"}]
+    }];
+
+    // 2. HÀM HIỂN THỊ LỊCH SỬ CHAT KHI VỪA VÀO TRANG (Load History)
+    // Chạy ngay khi trang web tải xong
+    document.addEventListener("DOMContentLoaded", function() {
+        const container = document.getElementById('messageContainer');
+        
+        // Xóa tin nhắn mặc định cứng trong HTML để tránh bị trùng lặp
+        container.innerHTML = ''; 
+
+        // Duyệt qua lịch sử và vẽ lại từng tin nhắn
+        chatHistory.forEach(msg => {
+            const role = msg.role === 'model' ? 'bot' : 'user';
+            const text = msg.parts[0].text;
+            addMessage(text, role);
+        });
+    });
+
+    // Các gợi ý tin nhắn
+    const suggestions = [
+        "🇻🇳 Mua quà gì ở Hà Nội?",
+        "🇬🇧 Best souvenirs in Vietnam?",
+        "🇻🇳 Kinh nghiệm trả giá ở chợ?",
+        "🎁 Shop đồ thủ công đẹp?"
+    ];
+
+    const suggestionArea = document.getElementById('suggestionArea');
+    suggestions.forEach(text => {
+        const chip = document.createElement('div');
+        chip.className = 'chip';
+        chip.innerText = text;
+        chip.onclick = () => {
+            document.getElementById('userInput').value = text;
+            sendMessage();
+        };
+        suggestionArea.appendChild(chip);
+    });
+
+    // Bật/Tắt khung chat
+    let isOpen = false;
+    function toggleChat() {
+        const box = document.getElementById('chatWindow');
+        isOpen = !isOpen;
+        box.style.display = isOpen ? 'flex' : 'none';
+        
+        // Cuộn xuống cuối khi mở chat
+        if(isOpen) {
+             const container = document.getElementById('messageContainer');
+             container.scrollTop = container.scrollHeight;
+        }
+    }
+
+    function handleEnter(e) {
+        if (e.key === 'Enter') sendMessage();
+    }
+
+    async function sendMessage() {
+        const input = document.getElementById('userInput');
+        const msg = input.value.trim();
+        if (!msg) return;
+
+        // --- XỬ LÝ USER ---
+        addMessage(msg, 'user');
+        chatHistory.push({ 
+            "role": "user", 
+            "parts": [{"text": msg}] 
+        });
+        // Lưu ngay sau khi user chat
+        localStorage.setItem('chatHistory', JSON.stringify(chatHistory));
+
+        input.value = '';
+
+        const typing = document.getElementById('typingIndicator');
+        typing.style.display = 'block';
+        
+        const container = document.getElementById('messageContainer');
+        container.scrollTop = container.scrollHeight;
+
+        try {
+            const response = await fetch(API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    message: msg,
+                    history: chatHistory 
+                })
+            });
+            
+            const data = await response.json();
+            typing.style.display = 'none';
+            
+            const botReply = data.reply;
+
+            // --- XỬ LÝ BOT ---
+            addMessage(botReply, 'bot');
+            chatHistory.push({
+                "role": "model",
+                "parts": [{"text": botReply}]
+            });
+            
+            // QUAN TRỌNG: Cập nhật lại localStorage sau khi Bot trả lời
+            localStorage.setItem('chatHistory', JSON.stringify(chatHistory));
+
+        } catch (error) {
+            typing.style.display = 'none';
+            addMessage("Lỗi kết nối server. Hãy kiểm tra lại API Key hoặc mạng.", 'bot');
+        }
+    }
+
+    function addMessage(text, sender) {
+        const container = document.getElementById('messageContainer');
+        const div = document.createElement('div');
+        div.className = `message ${sender}`;
+        
+        // Xử lý xuống dòng cho đẹp nếu văn bản dài
+        if (sender === 'bot') {
+            // Nếu là Bot: Dùng marked để chuyển **thành chữ đậm, xuống dòng chuẩn
+            div.innerHTML = marked.parse(text); 
+        } else {
+            // Nếu là Người dùng: Giữ nguyên text để tránh lỗi bảo mật (XSS)
+            div.innerText = text; 
+        }
+        
+        container.appendChild(div);
+        container.scrollTop = container.scrollHeight;
+    }
+    
+    // Thêm hàm xóa lịch sử (để bạn test cho dễ)
+    function clearChat() {
+        localStorage.removeItem('chatHistory');
+        location.reload();
+    }
+</script>
+    
+</body>
+</html>
+
