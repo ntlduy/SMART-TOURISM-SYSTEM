@@ -1,10 +1,23 @@
-# Bỏ qua thư mục môi trường ảo
-venv/
-env/
+# --- PHẦN CHO PYTHON (BACKEND) ---
+backend/venv/
+backend/__pycache__/
+backend/*.pyc
+backend/.env
+backend/instance/
 
-# Bỏ qua file biên dịch Python (Rác)
-__pycache__/
-*.pyc
+# --- PHẦN CHO REACT (FRONTEND) ---
+frontend/node_modules/
+frontend/build/
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
 
-# Bỏ qua file cấu hình IDE (nếu dùng VS Code)
-.vscode/
+# --- PHẦN CHUNG (IDE & OS) ---
+.vs/
+.idea/
+.DS_Store
+Thumbs.db
