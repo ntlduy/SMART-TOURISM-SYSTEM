@@ -24,6 +24,7 @@ class User(BaseModel, UserMixin):
     active = Column(Boolean, default=True)
     joined_date = Column(DateTime, default=datetime.now()) 
     user_role = Column(Enum(UserRole), default=UserRole.USER)
+    points = Column(Integer, default=0)
 
     reset_code = Column(String(10), nullable=True) 
     code_expiration = Column(DateTime, nullable=True)
@@ -34,7 +35,8 @@ class User(BaseModel, UserMixin):
             'name': self.name,
             'username': self.username,
             'email': self.email,
-            'avatar': self.avatar
+            'avatar': self.avatar,
+            'points' : self.points
         }
 
 # --- 1. TẠO BẢNG CITY RIÊNG ---
@@ -84,6 +86,7 @@ class Shop(BaseModel):
             'price': float(self.price) if self.price else 0,
             'address': self.address,
             'rating': self.rating,
+            'items': self.items,
             # Lấy tên từ đối tượng quan hệ (category_obj, city_obj)
             'category': self.category_obj.name if self.category_obj else None, 
             'city': self.city_obj.name if self.city_obj else None
@@ -116,67 +119,132 @@ class Comment(BaseModel):
             'created_date': self.created_date.strftime("%Y-%m-%d %H:%M:%S"),
             'images': self.image.split(';') if self.image else []
         }
+    
+
+# 1. Bảng TikTok Video (Gắn với City)
+class TikTokVideo(BaseModel):
+    __tablename__ = "tiktok_video"
+    video_url = Column(String(255), nullable=False) # Link gốc
+    embed_url = Column(String(255), nullable=False) # Link nhúng để hiện lên web
+    description = Column(String(255))
+    
+    # Liên kết với bảng City (Một tỉnh có nhiều video)
+    city_id = Column(Integer, ForeignKey("city.id"), nullable=False)
+    city = relationship("City", backref="tiktok_videos")
+
+# 2. Bảng quản lý phiên Thử thách (Lưu lộ trình 3 quán)
+class ChallengeSession(BaseModel):
+    __tablename__ = "challenge_session"
+    user_id = Column(Integer, ForeignKey("user.id"), nullable=False)
+    
+    # Lưu danh sách ID của 3 shop dưới dạng chuỗi JSON: ví dụ "[1, 5, 9]"
+    # Shop 1 (Gần nhất), Shop 2 (Vừa), Shop 3 (Xa nhất)
+    target_shops = Column(Text, nullable=False) 
+    
+    # Đánh dấu đang ở bước nào (0: chưa đi, 1: xong quán 1, 2: xong quán 2, 3: Hoàn thành)
+    current_step = Column(Integer, default=0) 
+    
+    status = Column(String(20), default="ACTIVE") # ACTIVE, COMPLETED, CANCELLED
+    created_date = Column(DateTime, default=datetime.now)
+
+    user = relationship("User", backref="challenge_sessions")
+
+
+# 1. Bảng danh sách các Voucher có trong hệ thống
+class Voucher(BaseModel):
+    __tablename__ = 'voucher'
+    code = Column(String(50), nullable=False, unique=True) # Mã voucher (VD: SALE50K)
+    description = Column(String(255), nullable=False)      # Mô tả (VD: Giảm 50k cho đơn 200k)
+    point_cost = Column(Integer, nullable=False)           # Giá đổi (VD: 100 điểm)
+    image_url = Column(String(255))                        # Ảnh voucher (nếu có)
+    
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "code": self.code,
+            "description": self.description,
+            "point_cost": self.point_cost,
+            "image_url": self.image_url
+        }
+
+# 2. Bảng lưu Voucher mà User đã đổi thành công
+class UserVoucher(BaseModel):
+    __tablename__ = 'user_voucher'
+    user_id = Column(Integer, ForeignKey('user.id'), nullable=False)
+    voucher_id = Column(Integer, ForeignKey('voucher.id'), nullable=False)
+    created_date = Column(DateTime, default=datetime.now)
+    status = Column(String(20), default="UNUSED") # UNUSED (Chưa dùng), USED (Đã dùng)
+
+    user = relationship("User", backref="owned_vouchers")
+    voucher = relationship("Voucher")
+
 
 if __name__ == '__main__':
     with app.app_context():
         # Xóa bảng cũ và tạo lại (CẨN THẬN: Mất dữ liệu cũ)
-        db.drop_all() 
+        # db.drop_all() 
         db.create_all()
-        print("Đã cập nhật cấu trúc bảng dữ liệu!")
-
-        # --- LOGIC IMPORT CSV MỚI  ---
-        csv_file_path = 'saleapp/data.csv' 
+        v1 = Voucher(code="FREE_SHIP", description="Mã Freeship tối đa 30k", point_cost=50)
+        v2 = Voucher(code="GIAM_20K", description="Giảm trực tiếp 20k cho đơn hàng", point_cost=100)
+        v3 = Voucher(code="BUFFET_VE", description="1 Vé Buffet miễn phí", point_cost=500)
         
-        if os.path.exists(csv_file_path):
-            try:
-                # Kiểm tra xem đã có dữ liệu chưa để tránh import trùng
-                if Shop.query.count() == 0: 
-                    print("Đang tiến hành import dữ liệu...")
-                    with open(csv_file_path, mode='r', encoding='utf-8-sig') as f:
-                        reader = csv.DictReader(f)
-                        count = 0
-                        for row in reader:
-                            # 1. Xử lý City (Nếu chưa có thì tạo mới)
-                            city_name = row['city'].strip()
-                            city = City.query.filter_by(name=city_name).first()
-                            if not city:
-                                city = City(name=city_name)
-                                db.session.add(city)
-                                db.session.commit() # Commit để lấy ID ngay
+        db.session.add_all([v1, v2, v3])
+        db.session.commit()
+        # print("Đã cập nhật cấu trúc bảng dữ liệu!")
 
-                            # 2. Xử lý Category (Nếu chưa có thì tạo mới)
-                            cat_name = row['category'].strip()
-                            category = Category.query.filter_by(name=cat_name).first()
-                            if not category:
-                                category = Category(name=cat_name)
-                                db.session.add(category)
-                                db.session.commit() # Commit để lấy ID ngay
+        # # --- LOGIC IMPORT CSV MỚI  ---
+        # csv_file_path = 'saleapp/data.csv' 
+        
+        # if os.path.exists(csv_file_path):
+        #     try:
+        #         # Kiểm tra xem đã có dữ liệu chưa để tránh import trùng
+        #         if Shop.query.count() == 0: 
+        #             print("Đang tiến hành import dữ liệu...")
+        #             with open(csv_file_path, mode='r', encoding='utf-8-sig') as f:
+        #                 reader = csv.DictReader(f)
+        #                 count = 0
+        #                 for row in reader:
+        #                     # 1. Xử lý City (Nếu chưa có thì tạo mới)
+        #                     city_name = row['city'].strip()
+        #                     city = City.query.filter_by(name=city_name).first()
+        #                     if not city:
+        #                         city = City(name=city_name)
+        #                         db.session.add(city)
+        #                         db.session.commit() # Commit để lấy ID ngay
+
+        #                     # 2. Xử lý Category (Nếu chưa có thì tạo mới)
+        #                     cat_name = row['category'].strip()
+        #                     category = Category.query.filter_by(name=cat_name).first()
+        #                     if not category:
+        #                         category = Category(name=cat_name)
+        #                         db.session.add(category)
+        #                         db.session.commit() # Commit để lấy ID ngay
                             
-                            # 3. Tạo Shop với ID của City và Category
-                            s = Shop(
-                                shop_name=row['shop_name'],
-                                address=row['address'],
-                                items=row['item_name'], 
-                                price=row['price'],
-                                rating=float(row['rating']) if row['rating'] else 0,
-                                lat=float(row['lat']) if row['lat'] else 0,
-                                lon=float(row['lon']) if row['lon'] else 0,
+        #                     # 3. Tạo Shop với ID của City và Category
+        #                     s = Shop(
+        #                         shop_name=row['shop_name'],
+        #                         address=row['address'],
+        #                         items=row['item_name'], 
+        #                         price=row['price'],
+        #                         rating=float(row['rating']) if row['rating'] else 0,
+        #                         lat=float(row['lat']) if row['lat'] else 0,
+        #                         lon=float(row['lon']) if row['lon'] else 0,
                                 
-                                # Gán khóa ngoại
-                                city_id=city.id,
-                                category_id=category.id
-                            )
-                            db.session.add(s)
-                            count += 1
+        #                         # Gán khóa ngoại
+        #                         city_id=city.id,
+        #                         category_id=category.id
+        #                     )
+        #                     db.session.add(s)
+        #                     count += 1
                         
-                        db.session.commit()
-                        print(f"Thành công! Đã import {count} cửa hàng.")
-                else:
-                    print("Dữ liệu Shop đã tồn tại, bỏ qua import CSV.")
+        #                 db.session.commit()
+        #                 print(f"Thành công! Đã import {count} cửa hàng.")
+        #         else:
+        #             print("Dữ liệu Shop đã tồn tại, bỏ qua import CSV.")
                     
-            except Exception as ex:
-                print("Lỗi khi import CSV: " + str(ex))
-                import traceback
-                traceback.print_exc()
-        else:
-            print(f"Không tìm thấy file '{csv_file_path}'.")
+        #     except Exception as ex:
+        #         print("Lỗi khi import CSV: " + str(ex))
+        #         import traceback
+        #         traceback.print_exc()
+        # else:
+        #     print(f"Không tìm thấy file '{csv_file_path}'.")

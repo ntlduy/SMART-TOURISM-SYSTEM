@@ -9,6 +9,8 @@ from datetime import datetime, timedelta
 import os
 from search_by_image import phan_tich_hinh_anh 
 
+from challenge import challenge_bp
+
 
 # --- 1. API SẢN PHẨM & TRANG CHỦ ---
 @app.route("/api/shops", methods=['GET']) 
@@ -259,6 +261,9 @@ def api_reset_password():
 @login.user_loader
 def user_load(user_id):
     return utils.get_user_by_id(user_id=user_id)
+
+
+app.register_blueprint(challenge_bp, url_prefix='/api/challenge')
 
 # --- ROUTE TEST (Thêm vào index.py) ---
 from flask import render_template
