@@ -26,6 +26,7 @@ CORS(app, supports_credentials=True)
 # CORS(app, origins=["http://localhost:3000"], supports_credentials=True)
 # CORS(app, resources={r"/api/*": {"origins": "http://localhost:3000"}}, supports_credentials=True)
 # CORS(app, resources={r"/api/*": {"origins": ["http://localhost:3000"]}}, supports_credentials=True)
+CORS(app, resources={r"/api/*": {"origins": "http://localhost:3000"}}, supports_credentials=True)
 
 mail = Mail(app)
 db = SQLAlchemy(app=app)
