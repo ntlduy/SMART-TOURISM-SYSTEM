@@ -1,270 +1,349 @@
 import json
 import os
-# from datetime import datetimes
-
 from flask import Blueprint, jsonify, request
 from flask_login import current_user, login_required
-from werkzeug.utils import secure_filename
-
 from __init__ import db
-from models import  ChallengeSession, City, Shop, TikTokVideo, User
+from models import ChallengeSession, Shop, TikTokVideo, User, Voucher, UserVoucher
 from utils import calculate_distance
-
-from models import Voucher, UserVoucher, User # Cập nhật dòng import
 
 challenge_bp = Blueprint("challenge", __name__)
 
-UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads", "challenge_receipts")
-if not os.path.exists(UPLOAD_DIR):
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-
-# --- API 1: Lấy danh sách Video theo GPS (Đã sửa đổi) ---
-@challenge_bp.route("/videos", methods=["POST"]) # Đổi thành POST để gửi JSON toạ độ
-def get_videos_by_location():
-    """
-    Input: { "lat": 10.762, "lon": 106.660 }
-    Logic: Tìm quán gần nhất -> Suy ra Tỉnh -> Trả về Video của Tỉnh đó.
-    """
-    data = request.get_json()
-    user_lat = data.get("lat")
-    user_lon = data.get("lon")
-
-    if not user_lat or not user_lon:
-        return jsonify({"error": "Không lấy được vị trí GPS"}), 400
-
-    # 1. Tìm quán gần nhất để xác định người dùng đang ở Tỉnh nào
-    # (Vì bảng City không có toạ độ, nên ta dựa vào toạ độ của các Shop)
-    all_shops = Shop.query.all()
-    
-    if not all_shops:
-        return jsonify({"error": "Hệ thống chưa có dữ liệu cửa hàng nào."}), 404
-
-    nearest_shop = None
-    min_dist = float('inf') # Vô cực
-
-    for shop in all_shops:
-        # Tính khoảng cách
-        dist = calculate_distance(user_lat, user_lon, shop.lat, shop.lon)
-        if dist is not None and dist < min_dist:
-            min_dist = dist
-            nearest_shop = shop
-    
-    # Nếu khoảng cách quá xa (ví dụ > 50km), có thể báo lỗi (tùy chọn)
-    # if min_dist > 50:
-    #     return jsonify({"error": "Bạn đang ở quá xa khu vực hỗ trợ."}), 400
-
-    if not nearest_shop:
-         return jsonify({"error": "Không xác định được vị trí"}), 400
-
-    # 2. Lấy thông tin Tỉnh từ quán gần nhất
-    current_city = nearest_shop.city_obj # Sử dụng relationship backref từ models.py
-    
-    print(f"User đang ở gần quán '{nearest_shop.shop_name}' -> Thuộc tỉnh: {current_city.name}")
-
-    # 3. Lấy video của Tỉnh đó
-    videos = TikTokVideo.query.filter_by(city_id=current_city.id).all()
-    
-    if not videos:
-        return jsonify({
-            "city": current_city.name,
-            "id": current_city.id,
-            "videos": [],
-            "message": f"Chào mừng đến {current_city.name}! Tuy nhiên chưa có video thử thách nào ở đây."
-        })
-
-    return jsonify({
-        "city": current_city.name,
-        "id": current_city.id,
-        "videos": [{
-            "id": v.id,
-            "embed_url": v.embed_url, 
-            "desc": v.description
-        } for v in videos]
-    })
-
-
-# --- API 2: Tạo Thử thách 3 Cửa hàng (Bước 2) ---
-@challenge_bp.route("/start", methods=["POST"])
-@login_required
-def start_challenge_route():
-    """
-    Khi user bấm vào 1 video -> Tạo lộ trình 3 quán gần nhất đến xa nhất.
-    Input: { "lat": 10.7, "lon": 106.6, "city_id": 1 }
-    """
-    data = request.get_json()
-    user_lat = data.get("lat")
-    user_lon = data.get("lon")
-    city_id = data.get("city_id")
-
-    if not user_lat or not user_lon:
-        return jsonify({"error": "Cần tọa độ GPS để tìm quán"}), 400
-
-    from sqlalchemy import and_ # Nhớ import thêm and_ nếu chưa có, hoặc dùng cách dưới cho đơn giản
-    
-    # Cách viết đơn giản không cần import thêm:
-    existing_session = ChallengeSession.query.filter(
-        ChallengeSession.user_id == current_user.id,
-        ChallengeSession.status != 'COMPLETED',
-        ChallengeSession.status != 'CANCELLED'
-    ).first()
-    
-    if existing_session:
-        # In ra log để debug xem tại sao nó tồn tại
-        print(f"--- TÌM THẤY SESSION CŨ: ID={existing_session.id}, STATUS={existing_session.status} ---")
-        return jsonify({
-            "error": "Bạn đang có một thử thách chưa hoàn thành.",
-            "session_id": existing_session.id,
-            "status": existing_session.status
-        }), 400
-
-    # 2. Lấy tất cả shop trong Tỉnh đó để tính khoảng cách
-    shops = Shop.query.filter_by(city_id=city_id).all()
-    if len(shops) < 3:
-        return jsonify({"error": "Khu vực này chưa đủ 3 quán để tạo thử thách"}), 400
-
-    # 3. Tính khoảng cách và sắp xếp từ Gần -> Xa
-    shop_distances = []
-    for s in shops:
-        dist = calculate_distance(user_lat, user_lon, s.lat, s.lon)
-        if dist is not None:
-            shop_distances.append({"shop": s, "dist": dist})
-    
-    # Sắp xếp tăng dần theo khoảng cách
-    shop_distances.sort(key=lambda x: x["dist"])
-
-    # Chọn 3 quán gần nhất (hoặc logic khác tùy Đại Vương)
-    selected_shops = shop_distances[:3]
-    selected_shop_ids = [item["shop"].id for item in selected_shops]
-
-    # 4. Lưu Session vào DB
-    new_session = ChallengeSession(
-        user_id=current_user.id,
-        target_shops=json.dumps(selected_shop_ids), # Lưu [1, 5, 20]
-        current_step=0, # Chưa đi quán nào
-        status="ACTIVE"
-    )
-    db.session.add(new_session)
-    db.session.commit()
-
-    return jsonify({
-        "message": "Đã tạo thử thách!",
-        "session_id": new_session.id,
-        "route": [{
-            "step": idx + 1,
-            "shop_name": item["shop"].shop_name,
-            "address": item["shop"].address,
-            "lat": item["shop"].lat,
-            "lon": item["shop"].lon,
-            "distance_km": round(item["dist"], 2)
-        } for idx, item in enumerate(selected_shops)]
-    })
-
-
-# --- API 3: Check-in tại từng điểm (Bước 3) ---
-@challenge_bp.route("/checkin", methods=["POST"])
-@login_required
-def checkin_step():
-    """
-    User đến quán -> Bấm xác nhận -> Hệ thống kiểm tra đúng thứ tự không.
-    Input: { "user_lat": ..., "user_lon": ..., "shop_id": ... }
-    """
-    # 1. Lấy session đang active
+# --- Helper: Lấy hoặc tạo Session ---
+def get_or_create_session(user_id):
     session = ChallengeSession.query.filter_by(
-        user_id=current_user.id, status="ACTIVE"
+        user_id=user_id, status="ACTIVE"
     ).first()
     
     if not session:
-        return jsonify({"error": "Bạn chưa bắt đầu thử thách nào"}), 400
+        # Tạo mới với danh sách rỗng
+        session = ChallengeSession(
+            user_id=user_id,
+            target_shops=json.dumps([]), # List rỗng
+            current_step=0,
+            status="ACTIVE"
+        )
+        db.session.add(session)
+        db.session.commit()
+    return session
 
-    data = request.form # Dùng form vì có thể up ảnh
-    current_lat = float(data.get("user_lat", 0))
-    current_lon = float(data.get("user_lon", 0))
-    
-    # Parse danh sách shop cần đi
-    target_ids = json.loads(session.target_shops) # [1, 5, 20]
-    current_step_index = session.current_step # Ví dụ: 0 (đang cần đi shop đầu tiên là ID 1)
+# --- API 1: Lấy danh sách Video (Có bộ lọc khoảng cách) ---
+@challenge_bp.route("/videos", methods=["POST"])
+def get_videos_with_filter():
+    """
+    Input: { "lat": ..., "lon": ..., "radius": 5 } (Radius là km, có thể null)
+    Logic: Trả về video, nếu có lat/lon/radius thì lọc các shop nằm trong bán kính.
+    """
+    data = request.get_json() or {}
+    user_lat = data.get("lat")
+    user_lon = data.get("lon")
+    radius = data.get("radius") # Bán kính (km), ví dụ: 5, 10, hoặc None (không lọc)
 
-    # 2. Kiểm tra xem user có đang check-in đúng quán theo thứ tự không
-    if current_step_index >= len(target_ids):
-        return jsonify({"message": "Bạn đã hoàn thành hết rồi!"})
+    query = TikTokVideo.query.join(Shop)
+    videos = query.all()
+    
+    results = []
+    
+    for v in videos:
+        shop = v.shop
+        dist = None
+        
+        # Tính khoảng cách nếu có GPS
+        if user_lat and user_lon:
+            try:
+                dist = calculate_distance(float(user_lat), float(user_lon), shop.lat, shop.lon)
+            except:
+                dist = None
+        
+        # Logic lọc: Nếu có radius và dist > radius thì BỎ QUA
+        if radius and dist is not None:
+            if dist > float(radius):
+                continue 
 
-    expected_shop_id = target_ids[current_step_index]
-    
-    # Lấy thông tin shop mục tiêu
-    target_shop = Shop.query.get(expected_shop_id)
-    
-    # 3. Kiểm tra khoảng cách GPS (Bán kính 200m)
-    dist = calculate_distance(current_lat, current_lon, target_shop.lat, target_shop.lon)
-    if dist > 0.2:
-        return jsonify({
-            "success": False, 
-            "error": f"Bạn còn cách quán {round(dist*1000)}m nữa. Hãy đến gần hơn!"
-        }), 400
+        results.append({
+            "video_id": v.id,
+            "embed_url": v.embed_url,
+            "desc": v.description,
+            "shop": {
+                "id": shop.id,
+                "name": shop.shop_name,
+                "address": shop.address,
+                "distance_km": round(dist, 2) if dist is not None else "N/A"
+            }
+        })
+        
+    # Sắp xếp: Gần nhất lên đầu (nếu có khoảng cách)
+    if user_lat and user_lon:
+        results.sort(key=lambda x: x['shop']['distance_km'] if isinstance(x['shop']['distance_km'], float) else 9999)
 
-    # 4. (Tùy chọn) Lưu ảnh bằng chứng nếu cần
-    # ... (Code lưu ảnh giống bài trước) ...
+    return jsonify({"videos": results})
 
-    # 5. Cập nhật tiến độ
-    session.current_step += 1
+
+# --- API 2: Thêm Shop vào Thử thách (Bấm vào Video) ---
+@challenge_bp.route("/add", methods=["POST"])
+@login_required
+def add_shop_to_challenge():
+    """
+    Input: { "shop_id": 1 }
+    Logic: Thêm shop vào list. Max 3 shop. Không trùng.
+    """
+    data = request.get_json()
+    shop_id = data.get("shop_id")
     
-    # Tính điểm: Mỗi quán 10 điểm, Quán cuối thưởng thêm 20 điểm
-    points_awarded = 10
-    is_finished = False
+    if not shop_id:
+        return jsonify({"error": "Thiếu Shop ID"}), 400
+
+    session = get_or_create_session(current_user.id)
+    current_list = json.loads(session.target_shops) # VD: [1, 5]
+
+    # 1. Kiểm tra giới hạn 3
+    if len(current_list) >= 3:
+        return jsonify({"error": "Bạn chỉ được nhận tối đa 3 thử thách cùng lúc!"}), 400
     
-    if session.current_step >= len(target_ids):
-        session.status = "COMPLETED"
-        points_awarded += 20 # Bonus hoàn thành lộ trình
-        is_finished = True
-    
-    # Cộng điểm cho User
-    user = User.query.get(current_user.id)
-    user.points = (user.points or 0) + points_awarded
-    
+    # 2. Kiểm tra trùng
+    if shop_id in current_list:
+        return jsonify({"error": "Bạn đã thêm quán này rồi!"}), 400
+        
+    # 3. Thêm vào DB
+    current_list.append(shop_id)
+    session.target_shops = json.dumps(current_list)
     db.session.commit()
-
+    
     return jsonify({
-        "success": True,
-        "message": "Check-in thành công!",
-        "points_earned": points_awarded,
-        "next_step": session.current_step + 1 if not is_finished else None,
-        "is_finished": is_finished
+        "success": True, 
+        "message": "Đã thêm thử thách!", 
+        "current_count": len(current_list)
     })
 
 
-# ---  API 4: Hủy và Xóa khỏi Database ---
-@challenge_bp.route("/cancel", methods=["POST"])
+# --- API 3: Xóa Shop khỏi Thử thách (Nếu khó quá bỏ qua) ---
+@challenge_bp.route("/remove", methods=["POST"])
 @login_required
-def cancel_challenge():
-    session = ChallengeSession.query.filter_by(
-        user_id=current_user.id, status="ACTIVE"
-    ).first()
+def remove_shop_from_challenge():
+    """
+    Input: { "shop_id": 1 }
+    Logic: Xóa ID khỏi list target_shops.
+    """
+    data = request.get_json()
+    shop_id = data.get("shop_id")
     
-    if session:
-        # THAY ĐỔI: Xóa hẳn dòng này khỏi Database thay vì chỉ đổi status
-        db.session.delete(session)
+    session = ChallengeSession.query.filter_by(user_id=current_user.id, status="ACTIVE").first()
+    if not session:
+        return jsonify({"error": "Không có thử thách nào"}), 400
+        
+    current_list = json.loads(session.target_shops)
+    
+    if shop_id in current_list:
+        current_list.remove(shop_id)
+        session.target_shops = json.dumps(current_list)
+        
+        # Nếu xóa hết thì có thể xóa luôn session hoặc giữ list rỗng tuỳ ý
+        if not current_list:
+            db.session.delete(session) # Xóa session luôn cho sạch
+        
         db.session.commit()
-        return jsonify({"success": True, "message": "Đã xóa thử thách cũ. Bạn có thể bắt đầu mới."})
+        return jsonify({"success": True, "message": "Đã xóa thử thách này."})
     
-    return jsonify({"error": "Không tìm thấy thử thách để xóa"}), 400
+    return jsonify({"error": "Thử thách này không có trong danh sách của bạn"}), 400
 
 
+# --- API 4: Xem danh sách thử thách hiện tại (My List) ---
+@challenge_bp.route("/current", methods=["GET"])
+@login_required
+def get_my_challenges():
+    """
+    Hiện danh sách các quán user đã chọn.
+    Input: ?lat=...&lon=... (để tính khoảng cách cập nhật)
+    """
+    user_lat = request.args.get('lat')
+    user_lon = request.args.get('lon')
+    
+    session = ChallengeSession.query.filter_by(user_id=current_user.id, status="ACTIVE").first()
+    if not session:
+        return jsonify({"has_session": False, "shops": []})
+        
+    target_ids = json.loads(session.target_shops)
+    shops_data = []
+    
+    for sid in target_ids:
+        s = Shop.query.get(sid)
+        if s:
+            dist = 0
+            if user_lat and user_lon:
+                try:
+                    dist = calculate_distance(float(user_lat), float(user_lon), s.lat, s.lon)
+                except: pass
+            
+            shops_data.append({
+                "shop_id": s.id,
+                "name": s.shop_name,
+                "address": s.address,
+                # "image": s.image, # Nếu có cột ảnh
+                "distance_km": round(dist, 2)
+            })
+            
+    return jsonify({
+        "has_session": True,
+        "count": len(shops_data),
+        "shops": shops_data
+    })
 
 
+# --- API 5: Check-in (Hoàn thành 1 thử thách) ---
+@challenge_bp.route("/checkin", methods=["POST"])
+@login_required
+def checkin_any_shop():
+    """
+    Logic: 
+    1. Duyệt qua list target.
+    2. Nếu dist < 0.5km -> Check-in thành công (break luôn).
+    3. Nếu không, lưu lại khoảng cách nhỏ nhất (min_dist) để báo user biết họ còn cách bao xa.
+    """
+    data = request.form
+    try:
+        user_lat = float(data.get("user_lat", 0))
+        user_lon = float(data.get("user_lon", 0))
+    except ValueError:
+        return jsonify({"error": "Tọa độ không hợp lệ"}), 400
+    
+    session = ChallengeSession.query.filter_by(user_id=current_user.id, status="ACTIVE").first()
+    if not session:
+        return jsonify({"error": "Bạn chưa nhận thử thách nào."}), 400
+        
+    target_ids = json.loads(session.target_shops) 
+    
+    matched_shop = None
+    
+    # Biến để theo dõi quán gần nhất nếu check-in thất bại
+    min_distance = float('inf') 
+    nearest_shop_name = ""
 
-# --- API 5: Lấy danh sách Voucher có thể đổi ---
+    for sid in target_ids:
+        s = Shop.query.get(sid)
+        if s:
+            dist = calculate_distance(user_lat, user_lon, s.lat, s.lon)
+            
+            # CASE 1: Đủ gần -> Lấy luôn shop này
+            if dist < 0.5: # 500m
+                matched_shop = s
+                break 
+            
+            # CASE 2: Chưa đủ gần -> Cập nhật quán "tiềm năng" gần nhất để báo cáo
+            if dist < min_distance:
+                min_distance = dist
+                nearest_shop_name = s.name if hasattr(s, 'name') else s.shop_name
+
+    # --- XỬ LÝ KẾT QUẢ ---
+    if matched_shop:
+        # XỬ LÝ THÀNH CÔNG
+        user = User.query.get(current_user.id)
+        user.points = (user.points or 0) + 15
+        
+        target_ids.remove(matched_shop.id)
+        session.target_shops = json.dumps(target_ids)
+        
+        shop_display_name = matched_shop.name if hasattr(matched_shop, 'name') else matched_shop.shop_name
+        msg = f"Check-in thành công tại {shop_display_name}! +15 điểm."
+        
+        if not target_ids:
+            msg += " Chúc mừng! Bạn đã hoàn thành sạch sành sanh các thử thách!"
+            session.status = "COMPLETED"
+            
+        db.session.commit()
+        return jsonify({"success": True, "message": msg, "points": 15})
+    
+    else:
+        # XỬ LÝ THẤT BẠI NHƯNG CÓ THÔNG TIN KHOẢNG CÁCH
+        if min_distance != float('inf'):
+            # Làm tròn khoảng cách cho đẹp (ví dụ 1.25 km)
+            dist_display = round(min_distance, 2)
+            return jsonify({
+                "error": f"Chưa tới nơi đâu! Bạn còn cách quán gần nhất ({nearest_shop_name}) khoảng {dist_display} km nữa.",
+                "distance": dist_display,
+                "nearest_shop": nearest_shop_name
+            }), 400
+        else:
+            return jsonify({"error": "Không tìm thấy dữ liệu quán trong thử thách!"}), 400@challenge_bp.route("/checkin", methods=["POST"])
+@login_required
+def checkin_any_shop():
+    """
+    Logic: 
+    1. Duyệt qua list target.
+    2. Nếu dist < 0.5km -> Check-in thành công (break luôn).
+    3. Nếu không, lưu lại khoảng cách nhỏ nhất (min_dist) để báo user biết họ còn cách bao xa.
+    """
+    data = request.form
+    try:
+        user_lat = float(data.get("user_lat", 0))
+        user_lon = float(data.get("user_lon", 0))
+    except ValueError:
+        return jsonify({"error": "Tọa độ không hợp lệ"}), 400
+    
+    session = ChallengeSession.query.filter_by(user_id=current_user.id, status="ACTIVE").first()
+    if not session:
+        return jsonify({"error": "Bạn chưa nhận thử thách nào."}), 400
+        
+    target_ids = json.loads(session.target_shops) 
+    
+    matched_shop = None
+    
+    # Biến để theo dõi quán gần nhất nếu check-in thất bại
+    min_distance = float('inf') 
+    nearest_shop_name = ""
+
+    for sid in target_ids:
+        s = Shop.query.get(sid)
+        if s:
+            dist = calculate_distance(user_lat, user_lon, s.lat, s.lon)
+            
+            # CASE 1: Đủ gần -> Lấy luôn shop này
+            if dist < 0.5: # 500m
+                matched_shop = s
+                break 
+            
+            # CASE 2: Chưa đủ gần -> Cập nhật quán "tiềm năng" gần nhất để báo cáo
+            if dist < min_distance:
+                min_distance = dist
+                nearest_shop_name = s.name if hasattr(s, 'name') else s.shop_name
+
+    # --- XỬ LÝ KẾT QUẢ ---
+    if matched_shop:
+        # XỬ LÝ THÀNH CÔNG
+        user = User.query.get(current_user.id)
+        user.points = (user.points or 0) + 15
+        
+        target_ids.remove(matched_shop.id)
+        session.target_shops = json.dumps(target_ids)
+        
+        shop_display_name = matched_shop.name if hasattr(matched_shop, 'name') else matched_shop.shop_name
+        msg = f"Check-in thành công tại {shop_display_name}! +15 điểm."
+        
+        if not target_ids:
+            msg += " Chúc mừng! Bạn đã hoàn thành sạch sành sanh các thử thách!"
+            session.status = "COMPLETED"
+            
+        db.session.commit()
+        return jsonify({"success": True, "message": msg, "points": 15})
+    
+    else:
+        # XỬ LÝ THẤT BẠI NHƯNG CÓ THÔNG TIN KHOẢNG CÁCH
+        if min_distance != float('inf'):
+            # Làm tròn khoảng cách cho đẹp (ví dụ 1.25 km)
+            dist_display = round(min_distance, 2)
+            return jsonify({
+                "error": f"Chưa tới nơi đâu! Bạn còn cách quán gần nhất ({nearest_shop_name}) khoảng {dist_display} km nữa.",
+                "distance": dist_display,
+                "nearest_shop": nearest_shop_name
+            }), 400
+        else:
+            return jsonify({"error": "Không tìm thấy dữ liệu quán trong thử thách!"}), 400
+
+# --- Các API Voucher giữ nguyên ---
 @challenge_bp.route("/vouchers", methods=["GET"])
 @login_required
 def get_vouchers():
-    """
-    Trả về danh sách tất cả voucher đang có trong hệ thống
-    """
     vouchers = Voucher.query.all()
-    
-    # Lấy thông tin điểm hiện tại của user để hiển thị (nếu đã login)
     user_points = 0
     if current_user.is_authenticated:
-        # Reload user từ DB để đảm bảo điểm số mới nhất
         u = User.query.get(current_user.id)
         user_points = u.points if u.points else 0
 
@@ -273,115 +352,40 @@ def get_vouchers():
         "vouchers": [v.to_dict() for v in vouchers]
     })
 
-
-# --- API 6: Thực hiện Đổi điểm (Redeem) ---
 @challenge_bp.route("/redeem", methods=["POST"])
 @login_required
 def redeem_voucher():
-    """
-    Input: { "voucher_id": 1 }
-    Logic: Trừ điểm User -> Tạo UserVoucher
-    """
     data = request.get_json()
     voucher_id = data.get("voucher_id")
     
     if not voucher_id:
         return jsonify({"error": "Chưa chọn voucher"}), 400
         
-    # 1. Lấy thông tin User và Voucher
-    user = User.query.get(current_user.id) # Lấy user mới nhất từ DB
+    user = User.query.get(current_user.id)
     voucher = Voucher.query.get(voucher_id)
     
     if not voucher:
         return jsonify({"error": "Voucher không tồn tại"}), 404
         
-    # 2. Kiểm tra xem User có đủ điểm không
     current_points = user.points if user.points else 0
     
     if current_points < voucher.point_cost:
         return jsonify({
             "success": False,
-            "error": f"Bạn không đủ điểm! (Có: {current_points}, Cần: {voucher.point_cost})"
+            "error": f"Bạn thiếu điểm! (Có: {current_points}, Cần: {voucher.point_cost})"
         }), 400
         
-    # 3. Thực hiện giao dịch (Trừ điểm + Thêm voucher)
     try:
-        # Trừ điểm
         user.points = current_points - voucher.point_cost
-        
-        # Thêm vào kho của user
         user_voucher = UserVoucher(user_id=user.id, voucher_id=voucher.id)
         db.session.add(user_voucher)
-        
         db.session.commit()
         
         return jsonify({
             "success": True,
-            "message": f"Đổi thành công voucher {voucher.code}!",
+            "message": f"Đổi thành công {voucher.code}!",
             "new_points": user.points
         })
-        
     except Exception as e:
         db.session.rollback()
-        return jsonify({"error": "Lỗi giao dịch: " + str(e)}), 500
-    
-
-
-# --- API MỚI: Lấy thông tin thử thách đang chạy (Resume) ---
-@challenge_bp.route("/current", methods=["GET"])
-@login_required
-def get_current_challenge():
-    """
-    Input: GET /api/challenge/current?lat=10.7&lon=106.6
-    Output: Trả về lộ trình kèm khoảng cách tính từ vị trí hiện tại.
-    """
-    # 1. Lấy toạ độ hiện tại của user gửi lên (nếu có)
-    user_lat = request.args.get('lat')
-    user_lon = request.args.get('lon')
-
-    # Tìm session đang active
-    session = ChallengeSession.query.filter(
-        ChallengeSession.user_id == current_user.id,
-        ChallengeSession.status == 'ACTIVE'
-    ).first()
-    
-    if not session:
-        return jsonify({"has_session": False}), 200
-
-    # Tái tạo lộ trình
-    try:
-        target_ids = json.loads(session.target_shops)
-        route_data = []
-        
-        for idx, shop_id in enumerate(target_ids):
-            s = Shop.query.get(shop_id)
-            if s:
-                # --- TÍNH LẠI KHOẢNG CÁCH ---
-                dist_km = 0
-                if user_lat and user_lon:
-                    try:
-                        # Chuyển đổi sang float và tính toán
-                        dist_km = calculate_distance(float(user_lat), float(user_lon), s.lat, s.lon)
-                        dist_km = round(dist_km, 2) # Làm tròn 2 số lẻ
-                    except ValueError:
-                        dist_km = 0 # Nếu dữ liệu lỗi thì để 0
-
-                route_data.append({
-                    "step": idx + 1,
-                    "shop_name": s.shop_name,
-                    "address": s.address,
-                    "lat": s.lat,
-                    "lon": s.lon,
-                    "distance_km": dist_km, # <--- Đã có khoảng cách mới nhất
-                    "status": "DONE" if idx < session.current_step else "PENDING"
-                })
-        
-        return jsonify({
-            "has_session": True,
-            "session_id": session.id,
-            "current_step": session.current_step,
-            "route": route_data
-        })
-    except Exception as e:
-        print("Lỗi resume:", str(e))
-        return jsonify({"error": "Lỗi dữ liệu session cũ"}), 500
+        return jsonify({"error": str(e)}), 500

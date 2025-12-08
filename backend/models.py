@@ -122,15 +122,31 @@ class Comment(BaseModel):
     
 
 # 1. Bảng TikTok Video (Gắn với City)
+# class TikTokVideo(BaseModel):
+#     __tablename__ = "tiktok_video"
+#     video_url = Column(String(255), nullable=False) # Link gốc
+#     embed_url = Column(String(255), nullable=False) # Link nhúng để hiện lên web
+#     description = Column(String(255))
+    
+#     # Liên kết với bảng City (Một tỉnh có nhiều video)
+#     city_id = Column(Integer, ForeignKey("city.id"), nullable=False)
+#     city = relationship("City", backref="tiktok_videos")
+
+# Trong file models.py
+
 class TikTokVideo(BaseModel):
     __tablename__ = "tiktok_video"
-    video_url = Column(String(255), nullable=False) # Link gốc
-    embed_url = Column(String(255), nullable=False) # Link nhúng để hiện lên web
+    video_url = Column(String(255), nullable=False)
+    embed_url = Column(String(255), nullable=False)
     description = Column(String(255))
     
-    # Liên kết với bảng City (Một tỉnh có nhiều video)
-    city_id = Column(Integer, ForeignKey("city.id"), nullable=False)
-    city = relationship("City", backref="tiktok_videos")
+    # THAY ĐỔI: Liên kết trực tiếp với Shop
+    shop_id = Column(Integer, ForeignKey("shop.id"), nullable=False)
+    shop = relationship("Shop", backref="videos")
+    
+    # (Có thể bỏ cột city_id đi hoặc giữ lại để tham chiếu phụ tuỳ Ngài)
+
+
 
 # 2. Bảng quản lý phiên Thử thách (Lưu lộ trình 3 quán)
 class ChallengeSession(BaseModel):

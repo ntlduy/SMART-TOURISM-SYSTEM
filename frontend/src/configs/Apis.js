@@ -1,4 +1,4 @@
-﻿// JavaScript source code
+// JavaScript source code
 import axios from "axios";
 
 const SERVER = "http://localhost:5000"; // Địa chỉ Backend Python
