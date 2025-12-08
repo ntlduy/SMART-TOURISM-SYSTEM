@@ -62,6 +62,7 @@ def get_videos_with_filter():
         results.append({
             "video_id": v.id,
             "embed_url": v.embed_url,
+            "video_url": v.video_url,
             "desc": v.description,
             "shop": {
                 "id": shop.id,
