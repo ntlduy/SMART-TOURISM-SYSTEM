@@ -46,7 +46,6 @@ def api_get_shops():
     # Serialize dữ liệu
     shops_data = [s.to_dict() for s in shops]
     categories = utils.get_all_categories()
-
     cities = utils.get_all_cities()
 
     return jsonify(
@@ -118,7 +117,6 @@ def api_register():
 
 @app.route("/api/login", methods=["POST"])
 def api_login():
-    # Nhận JSON
     data = request.get_json()
     if not data:  # Fallback nếu gửi form data
         username = request.form.get("username")
@@ -215,11 +213,9 @@ def api_search_by_image():
         res = cloudinary.uploader.upload(file)
         image_url = res["secure_url"]
 
-        identified_items = phan_tich_hinh_anh(image_url)
         shops = []
         if identified_items:
             shops_list = utils.search_shops_by_items(identified_items)
-            # Serialize danh sách shop
             shops = [s.to_dict() for s in shops_list]
 
         return jsonify(
@@ -257,7 +253,6 @@ def api_forgot_password():
 
 @app.route("/api/verify-code", methods=["POST"])
 def api_verify_code():
-    # Gom gọn việc kiểm tra mã vào 1 API
     data = request.get_json()
     user_id = data.get("user_id")
     code = data.get("reset_code")
