@@ -372,3 +372,14 @@ def add_comment(content, shop_id, user_id, rating=0, images=[]):
     db.session.commit()
     
     return c
+
+def update_user_avatar(user_id, avatar_url):
+    try:
+        u = get_user_by_id(user_id)
+        if u:
+            u.avatar = avatar_url
+            db.session.commit()
+            return True
+    except Exception as e:
+        print(e)
+        return False
