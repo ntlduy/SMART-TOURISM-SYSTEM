@@ -168,6 +168,32 @@ def api_add_comment(shop_id):
         return jsonify({'error': str(ex)}), 500
 
 
+@app.route('/api/update-avatar', methods=['POST'])
+@login_required
+def api_update_avatar():
+    avatar = request.files.get('avatar')
+    if not avatar:
+        return jsonify({'error': 'Chưa chọn ảnh'}), 400
+    
+    try:
+        # 1. Upload lên Cloudinary
+        res = cloudinary.uploader.upload(avatar)
+        new_avatar_url = res['secure_url']
+        
+        # 2. Cập nhật DB
+        if utils.update_user_avatar(current_user.id, new_avatar_url):
+            # Trả về URL mới để Frontend cập nhật ngay lập tức
+            return jsonify({
+                'message': 'Cập nhật ảnh đại diện thành công', 
+                'avatar_url': new_avatar_url,
+                'success': True
+            })
+        else:
+            return jsonify({'error': 'Lỗi lưu database'}), 500
+            
+    except Exception as ex:
+        return jsonify({'error': str(ex)}), 500
+
 @app.route('/api/chat', methods=['POST'])
 def api_chat():
     try:
@@ -178,8 +204,25 @@ def api_chat():
         if not user_message:
             return jsonify({'reply': 'Vui lòng gửi tin nhắn.', 'success': False}), 400
 
-        ai_reply = utils.get_gemini_response(user_message, chat_history=chat_history)
-        return jsonify({'reply': ai_reply, 'success': True})
+        # Gọi hàm AI (lúc này trả về dict)
+        ai_result = utils.get_gemini_response(user_message, chat_history=chat_history)
+        
+        # ai_result sẽ có dạng: { "answer": "...", "shop_ids": [1, 2] }
+        
+        # (Tùy chọn) Đại Vương có thể query lại DB để lấy thông tin chi tiết các shop này trả về luôn cho FE đẹp hơn
+        suggested_shops = []
+        if ai_result.get('shop_ids'):
+            for sid in ai_result['shop_ids']:
+                s = utils.get_shop_by_id(sid)
+                if s:
+                    suggested_shops.append(s.to_dict())
+
+        return jsonify({
+            'reply': ai_result.get('answer'), # Lời thoại của AI
+            'shop_ids': ai_result.get('shop_ids'), # Danh sách ID đơn thuần
+            'shops': suggested_shops, # (Option) Danh sách object shop đầy đủ để FE render card
+            'success': True
+        })
 
     except Exception as e:
         print(f"Chat Error: {e}")

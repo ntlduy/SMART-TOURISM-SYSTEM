@@ -62,7 +62,6 @@ def get_videos_with_filter():
         results.append({
             "video_id": v.id,
             "embed_url": v.embed_url,
-            "video_url": v.video_url,
             "desc": v.description,
             "shop": {
                 "id": shop.id,
@@ -179,7 +178,9 @@ def get_my_challenges():
                 "name": s.shop_name,
                 "address": s.address,
                 # "image": s.image, # Nếu có cột ảnh
-                "distance_km": round(dist, 2)
+                "distance_km": round(dist, 2),
+                "lat": s.lat, 
+                "lon": s.lon
             })
             
     return jsonify({
@@ -390,3 +391,42 @@ def redeem_voucher():
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
+    
+
+
+    # --- API 6: Xem Voucher của tôi (My Wallet) ---
+@challenge_bp.route("/my-vouchers", methods=["GET"])
+@login_required
+def get_my_owned_vouchers():
+    """
+    Trả về danh sách voucher mà user hiện tại đang sở hữu.
+    Bao gồm cả voucher chưa dùng (UNUSED) và đã dùng (USED).
+    """
+    # Query bảng UserVoucher, lọc theo user_id hiện tại, sắp xếp mới nhất lên đầu
+    my_vouchers = UserVoucher.query.filter_by(user_id=current_user.id)\
+                                   .order_by(UserVoucher.created_date.desc())\
+                                   .all()
+    
+    results = []
+    for uv in my_vouchers:
+        # uv là đối tượng UserVoucher
+        # uv.voucher là đối tượng Voucher (nhờ relationship trong models.py)
+        if uv.voucher:
+            results.append({
+                "transaction_id": uv.id,           # ID của lần đổi (dùng để xử lý khi user bấm "Sử dụng")
+                "status": uv.status,               # 'UNUSED' hoặc 'USED'
+                "redeemed_date": uv.created_date.strftime("%d/%m/%Y %H:%M"),
+                # Lấy thông tin chi tiết của Voucher gốc
+                "voucher_info": {
+                    "code": uv.voucher.code,
+                    "description": uv.voucher.description,
+                    "image_url": uv.voucher.image_url,
+                    "point_cost": uv.voucher.point_cost
+                }
+            })
+
+    return jsonify({
+        "success": True,
+        "count": len(results),
+        "data": results
+    })

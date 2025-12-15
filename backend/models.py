@@ -87,6 +87,9 @@ class Shop(BaseModel):
             'address': self.address,
             'rating': self.rating,
             'items': self.items,
+            # --- THÊM 2 DÒNG NÀY ---
+            'lat': self.lat,
+            'lon': self.lon,
             # Lấy tên từ đối tượng quan hệ (category_obj, city_obj)
             'category': self.category_obj.name if self.category_obj else None, 
             'city': self.city_obj.name if self.city_obj else None
@@ -198,7 +201,7 @@ class UserVoucher(BaseModel):
 if __name__ == '__main__':
     with app.app_context():
         # Xóa bảng cũ và tạo lại (CẨN THẬN: Mất dữ liệu cũ)
-        # db.drop_all() 
+        db.drop_all() 
         db.create_all()
         v1 = Voucher(code="FREE_SHIP", description="Mã Freeship tối đa 30k", point_cost=50)
         v2 = Voucher(code="GIAM_20K", description="Giảm trực tiếp 20k cho đơn hàng", point_cost=100)
@@ -206,61 +209,61 @@ if __name__ == '__main__':
         
         db.session.add_all([v1, v2, v3])
         db.session.commit()
-        # print("Đã cập nhật cấu trúc bảng dữ liệu!")
+        print("Đã cập nhật cấu trúc bảng dữ liệu!")
 
-        # # --- LOGIC IMPORT CSV MỚI  ---
-        # csv_file_path = 'saleapp/data.csv' 
+        # --- LOGIC IMPORT CSV MỚI  ---
+        csv_file_path = 'data.csv' 
         
-        # if os.path.exists(csv_file_path):
-        #     try:
-        #         # Kiểm tra xem đã có dữ liệu chưa để tránh import trùng
-        #         if Shop.query.count() == 0: 
-        #             print("Đang tiến hành import dữ liệu...")
-        #             with open(csv_file_path, mode='r', encoding='utf-8-sig') as f:
-        #                 reader = csv.DictReader(f)
-        #                 count = 0
-        #                 for row in reader:
-        #                     # 1. Xử lý City (Nếu chưa có thì tạo mới)
-        #                     city_name = row['city'].strip()
-        #                     city = City.query.filter_by(name=city_name).first()
-        #                     if not city:
-        #                         city = City(name=city_name)
-        #                         db.session.add(city)
-        #                         db.session.commit() # Commit để lấy ID ngay
+        if os.path.exists(csv_file_path):
+            try:
+                # Kiểm tra xem đã có dữ liệu chưa để tránh import trùng
+                if Shop.query.count() == 0: 
+                    print("Đang tiến hành import dữ liệu...")
+                    with open(csv_file_path, mode='r', encoding='utf-8-sig') as f:
+                        reader = csv.DictReader(f)
+                        count = 0
+                        for row in reader:
+                            # 1. Xử lý City (Nếu chưa có thì tạo mới)
+                            city_name = row['city'].strip()
+                            city = City.query.filter_by(name=city_name).first()
+                            if not city:
+                                city = City(name=city_name)
+                                db.session.add(city)
+                                db.session.commit() # Commit để lấy ID ngay
 
-        #                     # 2. Xử lý Category (Nếu chưa có thì tạo mới)
-        #                     cat_name = row['category'].strip()
-        #                     category = Category.query.filter_by(name=cat_name).first()
-        #                     if not category:
-        #                         category = Category(name=cat_name)
-        #                         db.session.add(category)
-        #                         db.session.commit() # Commit để lấy ID ngay
+                            # 2. Xử lý Category (Nếu chưa có thì tạo mới)
+                            cat_name = row['category'].strip()
+                            category = Category.query.filter_by(name=cat_name).first()
+                            if not category:
+                                category = Category(name=cat_name)
+                                db.session.add(category)
+                                db.session.commit() # Commit để lấy ID ngay
                             
-        #                     # 3. Tạo Shop với ID của City và Category
-        #                     s = Shop(
-        #                         shop_name=row['shop_name'],
-        #                         address=row['address'],
-        #                         items=row['item_name'], 
-        #                         price=row['price'],
-        #                         rating=float(row['rating']) if row['rating'] else 0,
-        #                         lat=float(row['lat']) if row['lat'] else 0,
-        #                         lon=float(row['lon']) if row['lon'] else 0,
+                            # 3. Tạo Shop với ID của City và Category
+                            s = Shop(
+                                shop_name=row['shop_name'],
+                                address=row['address'],
+                                items=row['item_name'], 
+                                price=row['price'],
+                                rating=float(row['rating']) if row['rating'] else 0,
+                                lat=float(row['lat']) if row['lat'] else 0,
+                                lon=float(row['lon']) if row['lon'] else 0,
                                 
-        #                         # Gán khóa ngoại
-        #                         city_id=city.id,
-        #                         category_id=category.id
-        #                     )
-        #                     db.session.add(s)
-        #                     count += 1
+                                # Gán khóa ngoại
+                                city_id=city.id,
+                                category_id=category.id
+                            )
+                            db.session.add(s)
+                            count += 1
                         
-        #                 db.session.commit()
-        #                 print(f"Thành công! Đã import {count} cửa hàng.")
-        #         else:
-        #             print("Dữ liệu Shop đã tồn tại, bỏ qua import CSV.")
+                        db.session.commit()
+                        print(f"Thành công! Đã import {count} cửa hàng.")
+                else:
+                    print("Dữ liệu Shop đã tồn tại, bỏ qua import CSV.")
                     
-        #     except Exception as ex:
-        #         print("Lỗi khi import CSV: " + str(ex))
-        #         import traceback
-        #         traceback.print_exc()
-        # else:
-        #     print(f"Không tìm thấy file '{csv_file_path}'.")
+            except Exception as ex:
+                print("Lỗi khi import CSV: " + str(ex))
+                import traceback
+                traceback.print_exc()
+        else:
+            print(f"Không tìm thấy file '{csv_file_path}'.")

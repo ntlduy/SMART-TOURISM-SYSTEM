@@ -9,8 +9,11 @@ import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import 'leaflet-routing-machine/dist/leaflet-routing-machine.css';
 import L from 'leaflet';
+import 'leaflet-routing-machine';
+
+const DEFAULT_IMAGE = '/assets/stores/default.png';
 // --- CẤU HÌNH API ---
-const API_BASE = 'http://127.0.0.1:5000';
+const API_BASE = 'http://localhost:5000';
 
 // --- TIỆN ÍCH ---
 const formatCurrency = (val) => {
@@ -23,34 +26,120 @@ L.Icon.Default.mergeOptions({
     iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
     shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
+// --- COMPONENT NÚT VỀ VỊ TRÍ HIỆN TẠI ---
+const RecenterControl = ({ lat, lon }) => {
+    const map = useMap();
 
-// --- COMPONENT VẼ ĐƯỜNG (ROUTING MACHINE) ---
+    const handleRecenter = (e) => {
+        e.stopPropagation();
+        if (lat && lon) {
+            map.flyTo([lat, lon], 16, { duration: 1.5 });
+        }
+    };
+
+    return (
+        <div className="leaflet-bottom leaflet-right">
+            <div className="leaflet-control leaflet-bar">
+                <button
+                    onClick={handleRecenter}
+                    title="Về vị trí của tôi"
+                    style={{
+                        width: '40px', height: '40px',
+                        background: 'white', border: 'none', cursor: 'pointer',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        color: '#007bff', boxShadow: '0 1px 5px rgba(0,0,0,0.65)'
+                    }}
+                >
+                    {/* Đảm bảo bạn đã import Navigation từ lucide-react */}
+                    <Navigation size={20} fill="#007bff" />
+                </button>
+            </div>
+        </div>
+    );
+};
+// --- COMPONENT NÚT KÍCH HOẠT CHỈ ĐƯỜNG ---
+const DirectionsControl = ({ onStart }) => {
+    return (
+        <div className="leaflet-bottom leaflet-left"> {/* Đặt ở góc dưới trái */}
+            <div className="leaflet-control leaflet-bar">
+                <button
+                    onClick={(e) => {
+                        e.stopPropagation(); // Ngăn click xuyên qua map
+                        onStart();
+                    }}
+                    style={{
+                        padding: '10px 15px',
+                        backgroundColor: '#007bff', // Màu xanh chủ đạo
+                        color: 'white',
+                        border: 'none',
+                        cursor: 'pointer',
+                        fontWeight: 'bold',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        fontSize: '14px',
+                        boxShadow: '0 2px 6px rgba(0,0,0,0.3)'
+                    }}
+                >
+                    <Navigation size={18} /> Chỉ đường tới đây
+                </button>
+            </div>
+        </div>
+    );
+};
+
+// --- COMPONENT VẼ ĐƯỜNG (ROUTING MACHINE) - ĐÃ FIX LỖI REMOVELAYER ---
 const RoutingMachine = ({ userLat, userLon, shopLat, shopLon }) => {
     const map = useMap();
 
     useEffect(() => {
         if (!map) return;
 
+        // 1. Kiểm tra toạ độ để tránh lỗi Invalid LatLng
+        if (userLat == null || userLon == null || shopLat == null || shopLon == null) {
+            return;
+        }
+
+        // 2. Tạo control chỉ đường
         const routingControl = L.Routing.control({
             waypoints: [
-                L.latLng(userLat, userLon), // Điểm bắt đầu (User)
-                L.latLng(shopLat, shopLon)  // Điểm đến (Shop)
+                L.latLng(userLat, userLon),
+                L.latLng(shopLat, shopLon)
             ],
             routeWhileDragging: false,
-            addWaypoints: false,            // Không cho phép thêm điểm dừng
-            draggableWaypoints: false,      // Không cho kéo thả điểm
-            fitSelectedRoutes: true,        // Tự động zoom vừa khung hình
+            addWaypoints: false,
+            draggableWaypoints: false,
+            fitSelectedRoutes: true,
             showAlternatives: false,
             lineOptions: {
-                styles: [{ color: '#007bff', weight: 5, opacity: 0.7 }] // Màu đường đi xanh dương
+                styles: [{ color: '#007bff', weight: 5, opacity: 0.7 }]
             },
-            createMarker: function () { return null; } // Ẩn marker mặc định của routing (để dùng marker riêng đẹp hơn)
+            createMarker: function () { return null; }
         }).addTo(map);
 
-        // Ẩn bảng hướng dẫn text (Turn right, turn left...) để giao diện gọn
-        routingControl.getContainer().style.display = 'none';
+        // Ẩn bảng hướng dẫn text
+        const container = routingControl.getContainer();
+        if (container) {
+            container.style.display = 'none';
+        }
 
-        return () => map.removeControl(routingControl);
+        // 3. CLEANUP FUNCTION (QUAN TRỌNG: SỬA LỖI REMOVELAYER TẠI ĐÂY)
+        return () => {
+            try {
+                // 1. Ép Routing Machine xoá hết các điểm Waypoints
+                // Việc này giúp hủy các lệnh vẽ đường đang chờ xử lý từ server
+                if (routingControl) {
+                    routingControl.getPlan().setWaypoints([]);
+
+                    // 2. Sau đó mới xóa control khỏi bản đồ
+                    if (map) {
+                        map.removeControl(routingControl);
+                    }
+                }
+            } catch (e) {
+                console.warn("Lỗi dọn dẹp Routing:", e);
+            }
+        };
     }, [map, userLat, userLon, shopLat, shopLon]);
 
     return null;
@@ -88,7 +177,7 @@ button { font-family: inherit; transition: all 0.2s; }
 .logo { display: flex; align-items: center; gap: 12px; cursor: pointer; transition: transform 0.2s; }
 .logo:hover { transform: scale(1.02); }
 .logo-symbol { width: 42px; height: 42px; background: var(--accent); color: white; border-radius: 10px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 10px rgba(0,0,0,0.2); border: 2px solid rgba(255,255,255,0.2); }
-.logo-text { font-family: 'Roboto Slab', serif; font-size: 24px; font-weight: 700; letter-spacing: -0.5px; line-height: 1; }
+.logo-text { font-family: 'Dancing Script', serif; font-size: 32px; font-weight: 700; letter-spacing: -0.5px; line-height: 1; }
 
 .auth-block { display: flex; gap: 12px; align-items: center; }
 .nav-btn { background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.2); color: white; padding: 8px 14px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 600; }
@@ -123,10 +212,65 @@ button { font-family: inherit; transition: all 0.2s; }
 .content-list { flex: 1; }
 
 .filter-box { border: 1px solid #eee; border-radius: var(--radius); background: white; padding: 25px; margin-bottom: 25px; box-shadow: var(--shadow-sm); }
-.filter-box h3 { font-family: 'Roboto Slab', serif; font-size: 18px; margin: 0 0 20px; color: var(--primary); border-bottom: 2px solid #f0e6d2; padding-bottom: 10px; display: inline-block; }
+/* --- SỬA CSS TIÊU ĐỀ BỘ LỌC --- */
+
+/* Tiêu đề mục lục */
+.filter-box h3 {
+    font-family: 'Roboto Slab', serif;
+    font-size: 18px;
+    color: var(--primary); /* Màu chữ nâu đậm */
+    margin: 0 0 20px;
+    padding-bottom: 12px; /* Khoảng cách giữa chữ và đường kẻ */
+    position: relative;
+    /* Bỏ border mờ cũ đi nếu có */
+    border-bottom: none;
+}
+
+/* Đường gạch chân: Dài full 100% và Đậm màu */
+.filter-box h3::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 40%; /* Kéo dài bằng chiều ngang ô */
+    height: 3px; /* Độ dày */
+    background-color: #d4a373; /* Màu kem đậm (Accent color) */
+    opacity: 1; /* Giảm chút độ gắt nếu cần, hoặc để 1 */
+    border-radius: 7px; /* Bo tròn đầu đường kẻ */
+}
 .filter-row { display: flex; gap: 10px; margin-bottom: 12px; font-size: 15px; align-items: center; cursor: pointer; }
 .price-inputs { display: flex; gap: 8px; align-items: center; }
 .price-inputs input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; }
+/* --- PRICE INPUT WITH SUFFIX --- */
+.price-input-wrapper {
+    position: relative;
+    flex: 1; /* Để nó co giãn đều */
+}
+
+/* Chỉnh lại input bên trong để chừa chỗ cho đuôi ,000 */
+.price-input-wrapper input {
+    width: 100%;
+    padding: 10px 45px 10px 10px !important; /* Padding phải 45px để không đè chữ */
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    font-weight: 700;
+    color: var(--primary);
+    text-align: right; /* Số canh phải cho đẹp */
+}
+
+/* Đuôi ,000 giả */
+.price-suffix {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #999;
+    font-size: 13px;
+    font-weight: 600;
+    pointer-events: none; /* Để bấm xuyên qua được */
+    background: white; /* Che viền nếu cần */
+    padding-left: 2px;
+}
 
 /* SHOP CARD */
 .shop-card-booking { display: flex; border-radius: var(--radius); overflow: hidden; background: white; margin-bottom: 25px; box-shadow: var(--shadow-sm); transition: all 0.3s; border: 1px solid #eee; cursor: pointer; }
@@ -154,7 +298,35 @@ button { font-family: inherit; transition: all 0.2s; }
 .detail-header-booking { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 30px; border-bottom: 1px solid #eee; padding-bottom: 20px; }
 .detail-title h1 { font-family: 'Roboto Slab', serif; font-size: 36px; color: var(--primary); margin: 0; line-height: 1.2; }
 .detail-location { display: flex; align-items: center; gap: 6px; color: var(--text-light); margin-top: 10px; font-size: 15px; }
-.btn-back { background: none; border: none; color: #006ce4; cursor: pointer; margin-bottom: 15px; padding: 0; font-weight: 600; display: flex; align-items: center; gap: 5px; }
+/* --- SỬA TRỰC TIẾP CLASS CŨ LUÔN --- */
+.btn-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 20px;
+    background-color: white;
+    color: var(--primary);
+    border: 1px solid #eee;
+    border-radius: 30px; /* Bo tròn viên thuốc */
+    font-weight: 700;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    margin-bottom: 20px;
+    font-family: 'Mulish', sans-serif;
+
+    /* Reset các style mặc định cũ (nếu có) */
+    text-decoration: none;
+}
+
+.btn-back:hover {
+    background-color: var(--primary);
+    color: white;
+    transform: translateX(-5px); /* Hiệu ứng trượt */
+    box-shadow: 0 5px 15px rgba(78, 56, 45, 0.2);
+    border-color: var(--primary);
+}
 .detail-gallery { display: grid; grid-template-columns: 2fr 1fr; gap: 15px; height: 450px; margin-bottom: 40px; border-radius: var(--radius); overflow: hidden; }
 .gallery-main img, .gallery-sub img { width: 100%; height: 100%; object-fit: cover; cursor: pointer; transition: opacity 0.2s; }
 .gallery-sub { display: flex; flex-direction: column; gap: 15px; }
@@ -194,7 +366,7 @@ button { font-family: inherit; transition: all 0.2s; }
 /* CHATBOX */
 .chat-btn { position: fixed; bottom: 30px; right: 30px; width: 64px; height: 64px; background-color: var(--primary); color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 100; box-shadow: 0 4px 20px rgba(78, 56, 45, 0.4); transition: transform 0.2s; }
 .chat-btn:hover { transform: scale(1.1); }
-.chat-window { position: fixed; bottom: 100px; right: 30px; width: 360px; height: 500px; background: white; border-radius: 16px; box-shadow: 0 10px 40px rgba(0,0,0,0.2); z-index: 9999; display: flex; flex-direction: column; overflow: hidden; border: 1px solid #eee; }
+.chat-window { position: fixed; bottom: 100px; right: 30px; width: 360px; height: 450px; background: white; border-radius: 16px; box-shadow: 0 10px 40px rgba(0,0,0,0.2); z-index: 9999; display: flex; flex-direction: column; overflow: hidden; border: 1px solid #eee; }
 .chat-header { background: var(--primary); color: white; padding: 15px; font-weight: 700; display: flex; justify-content: space-between; font-family: 'Mulish', sans-serif; }
 .chat-content { flex: 1; padding: 20px; overflow-y: auto; background: #f9f9f9; }
 .chat-msg { padding: 10px 15px; margin-bottom: 10px; border-radius: 16px; max-width: 85%; font-size: 14px; line-height: 1.4; }
@@ -234,7 +406,804 @@ button { font-family: inherit; transition: all 0.2s; }
 
 .map-section-pro { padding: 0; position: relative; height: 450px; background: #eee; }
 .action-bar-pro { padding: 20px 40px; background: #fafafa; border-top: 1px solid #ddd; display: flex; justify-content: space-between; align-items: center; }
+
+/* --- NEW CHALLENGE UI STYLES --- */
+.challenge-tabs { display: flex; justify-content: center; gap: 20px; margin-bottom: 30px; border-bottom: 1px solid #eee; padding-bottom: 0; }
+.tab-btn { background: none; border: none; padding: 15px 25px; font-size: 16px; font-weight: 700; color: #888; cursor: pointer; border-bottom: 3px solid transparent; transition: all 0.3s; font-family: 'Mulish', sans-serif; }
+.tab-btn.active { color: var(--primary); border-bottom-color: var(--accent); }
+.tab-btn:hover { color: var(--primary); }
+
+.video-feed-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 25px; }
+.video-card-pro { background: white; border-radius: 12px; overflow: hidden; box-shadow: var(--shadow-sm); transition: transform 0.3s; border: 1px solid #eee; }
+.video-card-pro:hover { transform: translateY(-5px); box-shadow: var(--shadow-md); border-color: var(--accent); }
+.vc-frame { height: 740px; width: 100%; border-bottom: 1px solid #eee; }
+.vc-info { padding: 20px; }
+.vc-shop-name { font-family: 'Roboto Slab', serif; font-size: 18px; color: var(--primary); margin: 0 0 5px; }
+
+
+.quest-list { display: flex; flex-direction: column; gap: 20px; max-width: 800px; margin: 0 auto; }
+.quest-card {
+    display: flex;
+    background: white;
+    border: 1px solid #eee;
+    border-radius: 12px;
+    /* overflow: hidden;  <--- XÓA HOẶC COMMENT DÒNG NÀY ĐI */
+    overflow: visible; /* Thêm dòng này */
+    padding: 20px;
+    align-items: center;
+    gap: 20px;
+    box-shadow: var(--shadow-sm);
+    position: relative; /* Thêm dòng này để căn chỉnh đường kẻ */
+    z-index: 1;
+}
+.quest-card.completed { background: #f0fff4; border-color: #48bb78; }
+.quest-icon { width: 60px; height: 60px; background: #fffaf0; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--accent); border: 2px solid var(--accent); flex-shrink: 0; }
+.quest-details { flex: 1; }
+.quest-actions { display: flex; flex-direction: column; gap: 10px; min-width: 140px; }
+
+.reward-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 20px; }
+.voucher-ticket-pro { background: radial-gradient(circle at left, transparent 10px, #fff 11px), radial-gradient(circle at right, transparent 10px, #fff 11px); background-position: 0 0, 100% 0; background-size: 50% 100%; background-repeat: no-repeat; padding: 20px 30px; border-radius: 8px; filter: drop-shadow(0 2px 5px rgba(0,0,0,0.1)); display: flex; align-items: center; gap: 20px; border: 1px solid #e0e0e0; position: relative; overflow: hidden; }
+.voucher-ticket-pro::before { content: ""; position: absolute; top: 10px; bottom: 10px; left: 75%; border-left: 2px dashed #ddd; }
+.v-left { flex: 1; padding-right: 20px; }
+.v-right { width: 20%; display: flex; flex-direction: column; align-items: center; justify-content: center; padding-left: 10px; }
+.point-cost { font-weight: 800; color: var(--accent); font-size: 18px; }
+
+.progress-header { text-align: center; margin-bottom: 30px; padding: 20px; background: white; border-radius: 12px; box-shadow: var(--shadow-sm); }
+.progress-bar-bg { width: 100%; height: 10px; background: #eee; border-radius: 5px; overflow: hidden; margin-top: 10px; }
+.progress-bar-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--primary)); transition: width 0.5s ease; }
+
+/* --- USER PROFILE STYLES --- */
+.profile-container { max-width: 900px; margin: 40px auto; display: flex; gap: 30px; }
+.profile-sidebar { width: 300px; background: white; border-radius: 12px; padding: 30px; text-align: center; box-shadow: var(--shadow-sm); border: 1px solid #eee; height: fit-content; }
+.profile-main { flex: 1; background: white; border-radius: 12px; padding: 30px; box-shadow: var(--shadow-sm); border: 1px solid #eee; }
+
+.p-avatar-large { width: 120px; height: 120px; border-radius: 50%; object-fit: cover; border: 4px solid var(--accent); margin-bottom: 15px; padding: 3px; background: white; }
+.p-name { font-family: 'Roboto Slab', serif; font-size: 24px; color: var(--primary); margin: 5px 0; }
+.p-username { color: #888; font-size: 14px; margin-bottom: 20px; }
+.p-stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 20px; }
+.p-stat-box { background: #fffcf5; padding: 15px; border-radius: 8px; border: 1px dashed var(--accent); }
+.p-stat-num { font-size: 20px; font-weight: 800; color: var(--primary); }
+.p-stat-label { font-size: 12px; color: #666; text-transform: uppercase; }
+
+.info-group { margin-bottom: 20px; }
+.info-label { font-size: 13px; color: #888; font-weight: 700; margin-bottom: 5px; display: block; }
+.info-value { font-size: 16px; color: #333; font-weight: 500; border-bottom: 1px solid #eee; padding-bottom: 8px; width: 100%; display: block; }
+
+/* FORGOT PASSWORD STEPS */
+.step-dots { display: flex; justify-content: center; gap: 8px; margin-bottom: 20px; }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: #eee; transition: all 0.3s; }
+.dot.active { background: var(--accent); transform: scale(1.2); }
+
+/* --- CSS MỚI CHO HIỆU ỨNG KẾT NỐI (TIMELINE) --- */
+
+/* 1. Tạo đường nét đứt nối dọc xuống */
+.quest-card::before {
+    content: "";
+    position: absolute;
+    top: 50px; /* Bắt đầu từ tâm icon (padding 20px + nửa icon 30px) */
+    left: 50px; /* Căn giữa tâm icon */
+    width: 0px;
+    height: calc(100% + 20px); /* Kéo dài hết thẻ + khoảng cách gap 20px */
+    border-left: 2px dashed #d4a373; /* Màu đường kẻ */
+    z-index: 0; /* Nằm dưới icon */
+}
+
+/* Ẩn đường kẻ ở thẻ cuối cùng */
+.quest-card:last-child::before {
+    display: none;
+}
+
+/* 2. Tạo dấu chấm tròn nhỏ ở giữa đoạn nối (trang trí) */
+.quest-card:not(:last-child)::after {
+    content: "";
+    position: absolute;
+    bottom: -14px; /* Nằm ở giữa khoảng trắng 20px */
+    left: 46px; /* Căn giữa (50px - 4px radius) */
+    width: 10px;
+    height: 10px;
+    background: #d4a373;
+    border-radius: 50%;
+    box-shadow: 0 0 0 4px #f7f5f0; /* Viền trùng màu nền body để tạo khoảng hở */
+    z-index: 1;
+}
+
+/* 3. Đảm bảo Icon nằm đè lên đường kẻ */
+.quest-icon {
+    position: relative;
+    z-index: 2; /* Nổi lên trên đường kẻ */
+    background: #fffaf0; /* Đảm bảo có màu nền để che đường kẻ đi qua tâm */
+}
+
+/* --- CHAT PAGE FULL SCREEN STYLES --- */
+.chat-page-container {
+    max-width: 900px;
+    margin: 0 auto;
+    height: calc(100vh - 100px); /* Trừ chiều cao header */
+    display: flex;
+    flex-direction: column;
+    background: white;
+    border-radius: 16px;
+    box-shadow: var(--shadow-md);
+    overflow: hidden;
+    border: 1px solid #eee;
+}
+
+.chat-header-pro {
+    padding: 20px;
+    background: var(--primary);
+    color: white;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+
+.chat-body-pro {
+    flex: 1;
+    padding: 30px;
+    overflow-y: auto;
+    background: #fdfbf7; /* Màu kem rất nhạt */
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.chat-footer-pro {
+    padding: 20px;
+    background: white;
+    border-top: 1px solid #eee;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.msg-bubble {
+    max-width: 80%;
+    padding: 14px 20px;
+    border-radius: 18px;
+    font-size: 15px;
+    line-height: 1.6;
+    position: relative;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+}
+
+.msg-bubble.user {
+    background: var(--accent);
+    color: white;
+    align-self: flex-end;
+    border-bottom-right-radius: 4px;
+}
+
+.msg-bubble.bot {
+    background: white;
+    color: var(--text-dark);
+    align-self: flex-start;
+    border-bottom-left-radius: 4px;
+    border: 1px solid #eee;
+}
+
+.suggestion-chips {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 10px;
+}
+
+.chip {
+    background: white;
+    border: 1px solid var(--accent);
+    color: var(--primary);
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-weight: 600;
+}
+
+.chip:hover {
+    background: var(--accent);
+    color: white;
+}
+
+.chat-input-pro {
+    flex: 1;
+    padding: 15px;
+    border-radius: 30px;
+    border: 1px solid #ddd;
+    outline: none;
+    font-family: inherit;
+    background: #f9f9f9;
+}
+.chat-input-pro:focus {
+    border-color: var(--accent);
+    background: white;
+    box-shadow: 0 0 0 3px rgba(212, 163, 115, 0.1);
+}
+
+/* --- ABOUT US SECTION (CẬP NHẬT GIAO DIỆN) --- */
+.about-section {
+    background-color: #f2ebe0; /* Màu nền nâu be nhạt */
+    padding: 80px 0;
+    margin-top: 80px;
+    border-top: 4px solid var(--accent);
+
+    /* Kỹ thuật ép full màn hình */
+    width: 100vw;
+    position: relative;
+    left: 50%;
+    right: 50%;
+    margin-left: -50vw;
+    margin-right: -50vw;
+}
+
+.about-title {
+    font-family: 'Dancing Script', serif;
+    font-size: 48px;
+    font-weight: 700;
+    color: var(--primary);
+    margin: 0 0 25px;
+
+    letter-spacing: -1px;
+    line-height: 1.2;
+}
+
+.about-grid {
+    display: grid;
+    /* Chia cột: Bên trái chữ rộng (1.5 phần), bên phải ô vuông hẹp (1 phần) */
+    grid-template-columns: 1.5fr 1fr;
+    gap: 80px; /* Khoảng cách giữa chữ và các ô */
+    align-items: center;
+}
+
+/* Grid chứa 4 ô vuông nhỏ */
+.feature-box-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr); /* 2 cột */
+    gap: 20px;
+
+    /* Giới hạn chiều rộng để các ô gom lại thành hình vuông nhỏ */
+    max-width: 320px;
+    margin-left: auto; /* Đẩy sang phải */
+}
+
+/* Thiết kế từng ô vuông */
+.feature-mini-card {
+    background: white;
+    border-radius: 16px;
+    text-align: center;
+    box-shadow: 0 4px 15px rgba(78, 56, 45, 0.08); /* Bóng nhẹ */
+    border: 1px solid rgba(78, 56, 45, 0.1);
+    transition: all 0.3s;
+
+    /* Quan trọng: Tạo hình vuông và căn giữa nội dung */
+    aspect-ratio: 1 / 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 15px;
+}
+
+.feature-mini-card:hover {
+    transform: translateY(-5px);
+    border-color: var(--accent);
+    box-shadow: 0 10px 25px rgba(78, 56, 45, 0.15);
+}
+
+.feature-mini-card h4 {
+    font-size: 14px;
+    font-weight: 700;
+    margin: 10px 0 5px 0;
+    color: var(--primary);
+}
+
+.feature-mini-card small {
+    font-size: 11px;
+    color: #888;
+    line-height: 1.3;
+}
+
+/* --- FOOTER CREDIT (MÀU NÂU ĐẬM & TO HƠN) --- */
+.footer-credit {
+    background: #4e382d; /* Màu nâu đậm chủ đạo */
+    color: rgba(255,255,255,0.9);
+    text-align: center;
+    padding: 40px 0; /* Tăng chiều cao lên 40px */
+    font-size: 15px;
+    border-top: 1px solid rgba(255,255,255,0.1);
+
+    /* Kỹ thuật ép full màn hình giống ở trên */
+    width: 100vw;
+    position: relative;
+    left: 50%;
+    right: 50%;
+    margin-left: -50vw;
+    margin-right: -50vw;
+    margin-bottom: -50px; /* Lấp khoảng trắng dưới cùng nếu có */
+}
+
 `;
+
+// --- COMPONENT: CHAT PAGE (FULL SCREEN) ---
+function ChatPageUI({ onBack, user }) {
+    const [history, setHistory] = useState([
+        { role: 'bot', text: `Chào ${user ? user.name : 'bạn'}! 👋\nTôi là trợ lý AI chuyên về quà lưu niệm.\nTôi có thể giúp bạn tìm đặc sản, gợi ý quà tặng hoặc tư vấn địa điểm mua sắm.` }
+    ]);
+    const [input, setInput] = useState('');
+    const [loading, setLoading] = useState(false);
+    const scrollRef = useRef(null);
+
+    // Tự động cuộn xuống cuối khi có tin nhắn mới
+    useEffect(() => {
+        if (scrollRef.current) scrollRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }, [history, loading]);
+
+    const handleSend = async (text = input) => {
+        if (!text.trim()) return;
+
+        // 1. Thêm tin nhắn user
+        const userMsg = { role: 'user', text: text };
+        setHistory(prev => [...prev, userMsg]);
+        setInput('');
+        setLoading(true);
+
+        try {
+            // 2. Chuẩn bị payload gửi API
+            const payload = {
+                message: text,
+                history: history.map(m => ({
+                    role: m.role === 'user' ? 'user' : 'model',
+                    parts: [{ text: m.text }]
+                }))
+            };
+
+            // 3. Gọi API
+            const res = await fetch(`${API_BASE}/api/chat`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+
+            // 4. Thêm tin nhắn Bot
+            setHistory(prev => [...prev, { role: 'bot', text: data.reply || "Xin lỗi, tôi không hiểu ý bạn." }]);
+        } catch (e) {
+            setHistory(prev => [...prev, { role: 'bot', text: "⚠️ Lỗi kết nối với server." }]);
+        }
+        setLoading(false);
+    };
+
+    const suggestions = [
+        "Đặc sản Quảng Ngãi làm quà?",
+        "Mua đồ gốm ở đâu uy tín?",
+        "Tư vấn quà tặng cho mẹ",
+        "Món gì để được lâu?"
+    ];
+
+    return (
+        <div className="container fade-in" style={{ paddingTop: '30px', paddingBottom: '30px' }}>
+            <button className="btn-back" onClick={onBack} style={{ marginBottom: '15px' }}>
+                <ChevronRight transform="rotate(180)" size={20} /> Quay lại
+            </button>
+
+            <div className="chat-page-container">
+                {/* HEADER */}
+                <div className="chat-header-pro">
+                    <div style={{ width: '45px', height: '45px', background: 'white', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--primary)' }}>
+                        <MessageCircle size={24} />
+                    </div>
+                    <div>
+                        <h3 style={{ margin: 0, fontFamily: 'Roboto Slab', fontSize: '18px' }}>Trợ lý SLocal AI</h3>
+                        <div style={{ fontSize: '13px', opacity: 0.8, display: 'flex', alignItems: 'center', gap: '5px' }}>
+                            <span style={{ width: '8px', height: '8px', background: '#4cd964', borderRadius: '50%' }}></span>
+                            Sẵn sàng hỗ trợ
+                        </div>
+                    </div>
+                </div>
+
+                {/* BODY */}
+                <div className="chat-body-pro">
+                    {history.map((msg, idx) => (
+                        <div key={idx} className={`msg-bubble ${msg.role}`}>
+                            <div style={{ whiteSpace: 'pre-wrap' }}>{msg.text}</div>
+                        </div>
+                    ))}
+
+                    {loading && (
+                        <div className="msg-bubble bot">
+                            <span className="loader" style={{ width: '20px', height: '20px', border: '3px solid #ccc', borderBottomColor: 'transparent' }}></span> Đang nhập...
+                        </div>
+                    )}
+
+                    {/* Phần Gợi ý (Chỉ hiện khi history ít để đỡ rối) */}
+                    {history.length < 3 && (
+                        <div style={{ alignSelf: 'center', marginTop: '20px', textAlign: 'center' }}>
+                            <p style={{ color: '#999', fontSize: '13px', marginBottom: '10px' }}>Gợi ý câu hỏi:</p>
+                            <div className="suggestion-chips" style={{ justifyContent: 'center' }}>
+                                {suggestions.map(s => (
+                                    <div key={s} className="chip" onClick={() => handleSend(s)}>{s}</div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    <div ref={scrollRef} />
+                </div>
+
+                {/* FOOTER */}
+                <div className="chat-footer-pro">
+                    <input
+                        className="chat-input-pro"
+                        placeholder="Nhập câu hỏi của bạn..."
+                        value={input}
+                        onChange={e => setInput(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && handleSend()}
+                        disabled={loading}
+                    />
+                    <button
+                        onClick={() => handleSend()}
+                        disabled={loading}
+                        style={{ width: '50px', height: '50px', borderRadius: '50%', background: 'var(--primary)', color: 'white', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'transform 0.2s' }}
+                    >
+                        <Send size={22} style={{ marginLeft: '3px' }} />
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function ForgotPasswordForm({ onClose, onSwitchToLogin }) {
+    const [step, setStep] = useState(1); // 1: Email, 2: Code, 3: New Pass
+    const [loading, setLoading] = useState(false);
+    const [email, setEmail] = useState('');
+    const [userId, setUserId] = useState(null); // Backend trả về ID sau khi gửi mail
+    const [code, setCode] = useState('');
+    const [newPass, setNewPass] = useState('');
+
+    // BƯỚC 1: GỬI EMAIL
+    const handleSendEmail = async () => {
+        if (!email) return alert("Vui lòng nhập email");
+        setLoading(true);
+        try {
+            const res = await fetch(`${API_BASE}/api/forgot-password`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email })
+            });
+            const data = await res.json();
+            if (data.success) {
+                setUserId(data.user_id); // Lưu user_id để dùng cho bước sau
+                setStep(2);
+            } else {
+                alert(data.error || "Email không tồn tại");
+            }
+        } catch (e) { alert("Lỗi kết nối server"); }
+        setLoading(false);
+    };
+
+    // BƯỚC 2: XÁC THỰC CODE
+    const handleVerifyCode = async () => {
+        if (!code) return alert("Vui lòng nhập mã");
+        setLoading(true);
+        try {
+            const res = await fetch(`${API_BASE}/api/verify-code`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: userId, reset_code: code })
+            });
+            const data = await res.json();
+            if (data.valid) {
+                setStep(3);
+            } else {
+                alert(data.error || "Mã không đúng hoặc đã hết hạn");
+            }
+        } catch (e) { alert("Lỗi kết nối server"); }
+        setLoading(false);
+    };
+
+    // BƯỚC 3: ĐỔI MẬT KHẨU
+    const handleResetPass = async () => {
+        if (!newPass) return alert("Vui lòng nhập mật khẩu mới");
+        setLoading(true);
+        try {
+            const res = await fetch(`${API_BASE}/api/reset-password`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: userId, reset_code: code, new_password: newPass })
+            });
+            const data = await res.json();
+            if (data.success) {
+                alert("Đổi mật khẩu thành công! Vui lòng đăng nhập lại.");
+                onSwitchToLogin(); // Chuyển về trang login
+            } else {
+                alert(data.error);
+            }
+        } catch (e) { alert("Lỗi kết nối server"); }
+        setLoading(false);
+    };
+
+    return (
+        <div className="auth-overlay">
+            <div className="auth-card">
+                <div className="auth-close" onClick={onClose}><X size={24} /></div>
+
+                <h2 className="auth-title">Khôi phục tài khoản</h2>
+                <div className="step-dots">
+                    <div className={`dot ${step >= 1 ? 'active' : ''}`}></div>
+                    <div className={`dot ${step >= 2 ? 'active' : ''}`}></div>
+                    <div className={`dot ${step >= 3 ? 'active' : ''}`}></div>
+                </div>
+
+                {step === 1 && (
+                    <div className="fade-in">
+                        <p className="auth-subtitle">Nhập email đã đăng ký để nhận mã xác nhận.</p>
+                        <div style={{ position: 'relative' }}>
+                            <Mail size={18} style={{ position: 'absolute', top: '15px', left: '15px', color: '#aaa' }} />
+                            <input
+                                className="modern-input" style={{ paddingLeft: '45px' }}
+                                placeholder="Email của bạn" type="email"
+                                value={email} onChange={e => setEmail(e.target.value)}
+                            />
+                        </div>
+                        <button className="btn-auth-full" onClick={handleSendEmail} disabled={loading}>
+                            {loading ? 'Đang gửi...' : 'Gửi mã xác nhận'}
+                        </button>
+                    </div>
+                )}
+
+                {step === 2 && (
+                    <div className="fade-in">
+                        <p className="auth-subtitle">Nhập mã 6 số đã được gửi tới <b>{email}</b></p>
+                        <div style={{ position: 'relative' }}>
+                            <Lock size={18} style={{ position: 'absolute', top: '15px', left: '15px', color: '#aaa' }} />
+                            <input
+                                className="modern-input" style={{ paddingLeft: '45px', letterSpacing: '5px', fontWeight: 'bold' }}
+                                placeholder="######" maxLength="6"
+                                value={code} onChange={e => setCode(e.target.value)}
+                            />
+                        </div>
+                        <button className="btn-auth-full" onClick={handleVerifyCode} disabled={loading}>
+                            {loading ? 'Đang kiểm tra...' : 'Xác thực'}
+                        </button>
+                        <div style={{ textAlign: 'center', marginTop: '10px', fontSize: '13px', color: '#666', cursor: 'pointer' }} onClick={() => setStep(1)}>
+                            Gửi lại mã?
+                        </div>
+                    </div>
+                )}
+
+                {step === 3 && (
+                    <div className="fade-in">
+                        <p className="auth-subtitle">Thiết lập mật khẩu mới.</p>
+                        <div style={{ position: 'relative' }}>
+                            <Lock size={18} style={{ position: 'absolute', top: '15px', left: '15px', color: '#aaa' }} />
+                            <input
+                                className="modern-input" style={{ paddingLeft: '45px' }}
+                                placeholder="Mật khẩu mới" type="password"
+                                value={newPass} onChange={e => setNewPass(e.target.value)}
+                            />
+                        </div>
+                        <button className="btn-auth-full" onClick={handleResetPass} disabled={loading}>
+                            {loading ? 'Đang xử lý...' : 'Đổi mật khẩu'}
+                        </button>
+                    </div>
+                )}
+
+                <div style={{ textAlign: 'center', marginTop: '20px', fontSize: '14px' }}>
+                    <span
+                        style={{ color: 'var(--primary)', fontWeight: 'bold', cursor: 'pointer' }}
+                        onClick={onSwitchToLogin}
+                    >
+                        Quay lại Đăng nhập
+                    </span>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function UserProfileUI({ user, setUser, onLogout }) { // Thêm prop setUser
+    const [uploading, setUploading] = useState(false);
+
+    // Xử lý khi chọn ảnh mới
+    const handleAvatarChange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        setUploading(true);
+        const fd = new FormData();
+        fd.append('avatar', file);
+
+        try {
+            // Giả sử API endpoint là /api/update-avatar
+            // Bạn cần đảm bảo Backend có route này
+            const res = await fetch(`${API_BASE}/api/update-avatar`, {
+                method: 'POST',
+                body: fd,
+                credentials: 'include'
+            });
+            const data = await res.json();
+
+            if (data.success) {
+                // Cập nhật lại state user ở App.js để giao diện đổi ngay lập tức
+                setUser(prev => ({ ...prev, avatar: data.new_avatar_url }));
+                alert("Cập nhật ảnh đại diện thành công!");
+            } else {
+                alert(data.error || "Lỗi cập nhật ảnh");
+            }
+        } catch (err) {
+            alert("Lỗi kết nối server");
+        }
+        setUploading(false);
+    };
+
+    if (!user) return <div className="container" style={{ padding: '50px', textAlign: 'center' }}>Vui lòng đăng nhập</div>;
+
+    return (
+        <div className="fade-in profile-container">
+            {/* CỘT TRÁI: AVATAR & THỐNG KÊ NHANH */}
+            <div className="profile-sidebar">
+
+                {/* --- PHẦN SỬA ĐỔI: WRAPPER ĐỂ CLICK UPLOAD --- */}
+                <div
+                    style={{ position: 'relative', width: '120px', margin: '0 auto 15px', cursor: 'pointer' }}
+                    onClick={() => !uploading && document.getElementById('avatar-upload').click()}
+                >
+                    <img
+                        src={user.avatar || `https://ui-avatars.com/api/?name=${user.name}&background=random`}
+                        alt="avatar"
+                        className="p-avatar-large"
+                        style={{ opacity: uploading ? 0.5 : 1, width: '100%', height: '120px', margin: 0 }}
+                    />
+
+                    {/* Icon máy ảnh hiện lên góc */}
+                    <div style={{
+                        position: 'absolute', bottom: '0', right: '0',
+                        background: 'var(--accent)', color: 'white',
+                        width: '32px', height: '32px', borderRadius: '50%',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        border: '2px solid white'
+                    }}>
+                        {uploading ? <span className="loader" style={{ width: '12px', height: '12px', border: '2px solid white' }}></span> : <Camera size={16} />}
+                    </div>
+
+                    {/* Input ẩn */}
+                    <input
+                        type="file"
+                        id="avatar-upload"
+                        hidden
+                        accept="image/*"
+                        onChange={handleAvatarChange}
+                        disabled={uploading}
+                    />
+                </div>
+                {/* ------------------------------------------- */}
+
+                <h2 className="p-name">{user.name}</h2>
+                <div className="p-username">@{user.username}</div>
+
+                <div className="p-stat-grid">
+                    <div className="p-stat-box">
+                        <div className="p-stat-num">{user.points || 0}</div>
+                        <div className="p-stat-label">Điểm</div>
+                    </div>
+                    <div className="p-stat-box">
+                        <div className="p-stat-num">0</div>
+                        <div className="p-stat-label">Voucher</div>
+                    </div>
+                </div>
+
+                <button
+                    className="btn-secondary"
+                    style={{ marginTop: '25px', width: '100%', color: '#e53e3e', borderColor: '#e53e3e' }}
+                    onClick={onLogout}
+                >
+                    <LogOut size={16} style={{ marginRight: '5px' }} /> Đăng xuất
+                </button>
+            </div>
+
+            {/* CỘT PHẢI: THÔNG TIN CHI TIẾT (GIỮ NGUYÊN) */}
+            <div className="profile-main">
+                <h3 style={{ fontFamily: 'Roboto Slab', fontSize: '20px', color: 'var(--primary)', borderBottom: '1px solid #eee', paddingBottom: '10px', marginBottom: '20px' }}>
+                    Thông tin tài khoản
+                </h3>
+
+                <div className="info-group">
+                    <label className="info-label">Họ và tên</label>
+                    <span className="info-value">{user.name}</span>
+                </div>
+
+                <div className="info-group">
+                    <label className="info-label">Email</label>
+                    <span className="info-value">{user.email || "Chưa cập nhật"}</span>
+                </div>
+
+                <div className="info-group">
+                    <label className="info-label">Tên đăng nhập</label>
+                    <span className="info-value">{user.username}</span>
+                </div>
+
+                <div className="info-group">
+                    <label className="info-label">Vai trò</label>
+                    <span className="info-value">Thành viên</span>
+                </div>
+
+                <div style={{ marginTop: '40px', padding: '20px', background: '#f9f9f9', borderRadius: '8px' }}>
+                    <h4 style={{ margin: '0 0 10px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <Trophy size={20} color="var(--accent)" /> Hạng thành viên
+                    </h4>
+                    <p style={{ fontSize: '14px', color: '#666', margin: 0 }}>
+                        Tích cực tham gia thử thách Check-in để nhận thêm điểm và đổi quà hấp dẫn!
+                    </p>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// --- COMPONENT: SHOP CARD (Dùng chung cho Home & Search Image) ---
+const ShopCard = ({ shop, onClick }) => {
+    return (
+        <div className="shop-card-booking" onClick={onClick} style={{ minHeight: '160px', marginBottom: '20px' }}>
+            {/* 1. ẢNH ĐẠI DIỆN */}
+            <div className="sc-img" style={{ width: '220px', minHeight: 'auto' }}>
+                <img
+                    // Logic ảnh: Nếu shop có ảnh thật thì dùng, không thì dùng unsplash theo category
+                    src={shop.image || DEFAULT_IMAGE}
+                    onError={(e) => { e.target.onerror = null; e.target.src = DEFAULT_IMAGE; }}
+                    alt={shop.name}
+                    style={{ height: '100%', width: '100%', objectFit: 'cover' }}
+                />
+            </div>
+
+            {/* 2. THÔNG TIN CHÍNH */}
+            <div className="sc-info" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '0 30px' }}>
+                {/* Dòng 1: Tên Shop & Rating */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', width: '100%' }}>
+                    <h2 style={{ fontSize: '20px', margin: 0, color: '#4e382d', fontFamily: 'Roboto Slab, serif' }}>
+                        {shop.name}
+                    </h2>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px', background: '#fff', padding: '4px 8px', borderRadius: '6px', border: '1px solid #eee', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
+                        <span style={{ fontWeight: 'bold', color: '#2c2420', fontSize: '15px' }}>{shop.rating || 4.5}</span>
+                        <Star size={16} fill="#f5a623" color="#f5a623" />
+                    </div>
+                </div>
+
+                {/* Dòng 2: Địa chỉ */}
+                <div style={{ fontSize: '15px', color: '#555', lineHeight: '1.6' }}>
+                    <MapPin size={14} style={{ marginRight: '4px', verticalAlign: 'text-bottom' }} />
+                    <span style={{ fontWeight: '500' }}>{shop.city}</span>
+                    <span style={{ margin: '0 8px', color: '#ccc' }}>•</span>
+                    <span style={{ color: '#666' }}>{shop.address}</span>
+                </div>
+
+                {/* Dòng 3: Items match (Dành riêng cho Search Image nếu có) */}
+                {shop.matched_items && (
+                    <div style={{ marginTop: '8px', fontSize: '13px', color: '#008234', background: '#e6f6eb', padding: '5px 10px', borderRadius: '4px', width: 'fit-content' }}>
+                        <CheckCircle size={12} style={{ marginRight: '5px' }} />
+                        Có bán: <b>{shop.matched_items}</b>
+                    </div>
+                )}
+            </div>
+
+            {/* 3. CỘT GIÁ VÀ NÚT */}
+            <div className="sc-price-col" style={{ justifyContent: 'center', width: '200px', borderLeft: '1px solid #f0f0f0' }}>
+                <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: '12px', color: '#888', marginBottom: '4px' }}>Giá tham khảo</div>
+                    <div className="sc-price-value" style={{ fontSize: '24px', color: '#4e382d' }}>
+                        {new Intl.NumberFormat('vi-VN').format(shop.price)},000 ₫
+                    </div>
+                    <div style={{ fontSize: '11px', color: '#999' }}>Đã bao gồm thuế</div>
+                </div>
+
+                <button className="btn-view-detail" style={{ marginTop: '20px', background: '#d4a373', fontSize: '14px', padding: '10px' }}>
+                    Xem chi tiết <ChevronRight size={16} />
+                </button>
+            </div>
+        </div>
+    );
+};
 
 // --- COMPONENT CHÍNH ---
 export default function App() {
@@ -261,10 +1230,30 @@ export default function App() {
     const [chatHistory, setChatHistory] = useState([]);
     const [chatInput, setChatInput] = useState('');
     const chatEndRef = useRef(null);
+    // THÊM STATE MỚI ĐỂ LƯU VỊ TRÍ CỦA TÔI
+    const [myLocation, setMyLocation] = useState(null);
+
+    // 2. HÀM XỬ LÝ KHI BẤM NÚT "CHỈ ĐƯỜNG"
+    const handleStartNavigation = () => {
+        if (navigator.geolocation) {
+            // Có thể thêm loading state ở đây nếu muốn
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    setMyLocation({
+                        lat: position.coords.latitude,
+                        lon: position.coords.longitude
+                    });
+                },
+                () => alert("Không thể lấy vị trí. Vui lòng kiểm tra quyền GPS.")
+            );
+        } else {
+            alert("Trình duyệt không hỗ trợ định vị.");
+        }
+    };
 
     // 1. KHỞI TẠO: CHECK LOGIN
     useEffect(() => {
-        fetch(`${API_BASE}/api/current-user`)
+        fetch(`${API_BASE}/api/current-user`, { credentials: 'include' })
             .then(res => res.json())
             .then(data => { if (data.is_authenticated) setUser(data.user); });
     }, []);
@@ -319,7 +1308,8 @@ export default function App() {
         try {
             const res = await fetch(`${API_BASE}/api/login`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password })
+                body: JSON.stringify({ username, password }),
+                credentials: 'include'
             });
             const data = await res.json();
             if (data.success) { setUser(data.user); setView('home'); }
@@ -332,7 +1322,8 @@ export default function App() {
         try {
             const res = await fetch(`${API_BASE}/api/register`, {
                 method: 'POST',
-                body: formData // Gửi dạng multipart/form-data
+                body: formData, // Gửi dạng multipart/form-data
+                credentials: 'include'
             });
             const data = await res.json();
             if (data.success) {
@@ -394,10 +1385,12 @@ export default function App() {
             <nav className="navbar">
                 <div className="container nav-inner">
                     <div className="logo" onClick={() => setView('home')}>
-                        <div className="logo-symbol">
-                            <Gift size={24} strokeWidth={2.5} />
-                        </div>
-                        <span className="logo-text">SLocale</span>
+                        <img
+                            src="/logo.png"
+                            alt="Logo"
+                            style={{ width: '50px', height: '50px', objectFit: 'contain', marginRight: '10px' }}
+                        />
+                        <span className="logo-text">SLocaL</span>
                     </div>
 
                     <div className="auth-block">
@@ -415,14 +1408,27 @@ export default function App() {
                             <Camera size={18} /> Tìm bằng ảnh
                         </button>
 
+                        <button
+                            className={`nav-btn ${view === 'chat' ? 'active' : ''}`}
+                            onClick={() => setView('chat')} // Chuyển thẳng sang trang Chat Full
+                        >
+                            <MessageCircle size={18} /> Trợ lý AI
+                        </button>
+
                         {user ? (
                             <div className="user-profile">
-                                <img src={user.avatar || `https://ui-avatars.com/api/?name=${user.name}&background=random`} className="avatar" alt="avt" />
-                                <div className="user-info-text">
-                                    <div style={{ fontWeight: 'bold', fontSize: '14px' }}>{user.name}</div>
+                                {/* Click vào avatar hoặc tên để mở trang Profile */}
+                                <div
+                                    style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}
+                                    onClick={() => setView('profile')}
+                                >
+                                    <img src={user.avatar || `https://ui-avatars.com/api/?name=${user.name}&background=random`} className="avatar" alt="avt" />
+                                    <div className="user-info-text">
+                                        <div style={{ fontWeight: 'bold', fontSize: '14px' }}>{user.name}</div>
+                                    </div>
                                 </div>
                                 <button className="btn-logout" onClick={async () => {
-                                    await fetch(`${API_BASE}/api/logout`, { method: 'POST' }); setUser(null); setView('home');
+                                    await fetch(`${API_BASE}/api/logout`, { method: 'POST', credentials: 'include' }); setUser(null); setView('home');
                                 }}><LogOut size={16} /></button>
                             </div>
                         ) : (
@@ -443,8 +1449,8 @@ export default function App() {
                         {/* HERO HEADER */}
                         <div className="hero-header">
                             <div className="container">
-                                <h1>Tìm món quà hoàn hảo cho chuyến đi</h1>
-                                <p>Khám phá hàng ngàn món đồ lưu niệm độc đáo tại địa phương.</p>
+                                <h1>Tìm món quà hoàn hảo cho chuyến đi!</h1>
+                                <p>Khám phá hàng ngàn trung tâm thương mại & cửa hàng lưu niệm độc đáo.</p>
                             </div>
                         </div>
 
@@ -507,8 +1513,8 @@ export default function App() {
                                         />
                                         <div style={{ display: 'flex', flexDirection: 'column', lineHeight: '1.2' }}>
                                             <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
-                                                <Star size={16} fill="#f5a623" color="#f5a623" />
-                                                <span style={{ fontWeight: 'bold', fontSize: '15px' }}>trở lên</span>
+                                          
+                                                <span style={{ fontWeight: 'bold', fontSize: '15px' }}>Sao trở lên</span>
                                             </div>
                                             <small style={{ color: '#999', fontSize: '11px' }}>Nhập số sao (VD: 4.5)</small>
                                         </div>
@@ -559,27 +1565,34 @@ export default function App() {
                                 {/* 3. BOX LỌC NGÂN SÁCH (Budget) */}
                                 <div className="filter-box">
                                     <h3>Ngân sách</h3>
-                                    <div className="price-inputs">
-                                        <input
-                                            type="number"
-                                            placeholder="Từ..."
-                                            value={filters.from_price}
-                                            onChange={e => setFilters({ ...filters, from_price: e.target.value })}
-                                        />
-                                        <span>-</span>
-                                        <input
-                                            type="number"
-                                            placeholder="Đến..."
-                                            value={filters.to_price}
-                                            onChange={e => setFilters({ ...filters, to_price: e.target.value })}
-                                        />
+                                    <div className="price-inputs" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+
+                                        {/* Ô nhập giá TỪ */}
+                                        <div className="price-input-wrapper">
+                                            <input
+                                                type="number"
+                                                placeholder="0"
+                                                value={filters.from_price}
+                                                onChange={e => setFilters({ ...filters, from_price: e.target.value })}
+                                            />
+                                            <span className="price-suffix">,000đ</span>
+                                        </div>
+
+                                        <span style={{ fontWeight: 'bold', color: '#ccc' }}>-</span>
+
+                                        {/* Ô nhập giá ĐẾN */}
+                                        <div className="price-input-wrapper">
+                                            <input
+                                                type="number"
+                                                placeholder="0"
+                                                value={filters.to_price}
+                                                onChange={e => setFilters({ ...filters, to_price: e.target.value })}
+                                            />
+                                            <span className="price-suffix">,000đ</span>
+                                        </div>
                                     </div>
-                                    <button
-                                        className="btn-secondary"
-                                        style={{ marginTop: '10px', width: '100%', fontSize: '13px' }}
-                                    >
-                                        Áp dụng giá
-                                    </button>
+
+                                    
                                 </div>
                             </div>
                             {/* --- KẾT THÚC SIDEBAR --- */}
@@ -594,8 +1607,8 @@ export default function App() {
                                                 {/* 1. ẢNH ĐẠI DIỆN */}
                                                 <div className="sc-img" style={{ width: '220px', minHeight: 'auto' }}>
                                                     <img
-                                                        src={`https://source.unsplash.com/random/300x300/?souvenir,${shop.category}`}
-                                                        onError={e => e.target.src = 'https://via.placeholder.com/300x300?text=Shop'}
+                                                        src={shop.image || DEFAULT_IMAGE}
+                                                        onError={(e) => { e.target.onerror = null; e.target.src = DEFAULT_IMAGE; }}
                                                         alt={shop.name}
                                                         style={{ height: '100%', width: '100%', objectFit: 'cover' }}
                                                     />
@@ -624,34 +1637,12 @@ export default function App() {
                                                         <span style={{ margin: '0 8px', color: '#ccc' }}>•</span>
                                                         <span style={{ color: '#666' }}>{shop.address}</span>
                                                     </div>
-
-                                                    {/* --- CODE ITEMS PREVIEW (HIỆN TỐI ĐA 3 MÓN) --- */}
-                                                    {shop.items && (
-                                                        <div style={{ marginTop: '8px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                                                            {(Array.isArray(shop.items) 
-                                                                ? shop.items 
-                                                                : String(shop.items).replace(/[\[\]']/g, "").split(',')
-                                                            ).slice(0, 3).map((item, i) => (
-                                                                <span key={i} style={{ 
-                                                                    fontSize: '11px', background: '#f0f0f0', padding: '3px 8px', 
-                                                                    borderRadius: '4px', color: '#666', border: '1px solid #ddd' 
-                                                                }}>
-                                                                    {item.trim()}
-                                                                </span>
-                                                            ))}
-                                                            {/* Nếu nhiều hơn 3 món thì hiện dấu ... */}
-                                                            {(Array.isArray(shop.items) ? shop.items.length : String(shop.items).split(',').length) > 3 && 
-                                                                <span style={{ fontSize: '11px', color: '#999', alignSelf: 'center' }}>+ thêm...</span>
-                                                            }
-                                                        </div>
-                                                    )}
-
                                                 </div>
 
                                                 {/* 3. CỘT GIÁ VÀ NÚT */}
                                                 <div className="sc-price-col" style={{ justifyContent: 'center', width: '200px', borderLeft: '1px solid #f0f0f0' }}>
                                                     <div style={{ textAlign: 'right' }}>
-                                                        <div style={{ fontSize: '12px', color: '#888', marginBottom: '4px' }}>Giá trung bình</div>
+                                                        <div style={{ fontSize: '12px', color: '#888', marginBottom: '4px' }}>Giá tham khảo</div>
                                                         <div className="sc-price-value" style={{ fontSize: '24px', color: '#4e382d' }}>
                                                             {/* Format giá + thêm đuôi ,000 */}
                                                             {new Intl.NumberFormat('vi-VN').format(shop.price)},000 ₫
@@ -671,14 +1662,64 @@ export default function App() {
                                         )}
                                     </div>
                                 )}
+
                             </div>
                         </div>
                     </div>
                 )}
 
+                
+
                 {/* === VIEW: CHALLENGE === */}
                 {view === 'challenge' && (
-                    <ChallengeUI user={user} onLoginRequest={() => setView('login')} />
+                    <ChallengeUI
+                        user={user}
+                        onLoginRequest={() => setView('login')}
+                        onBack={() => setView('home')}  // <--- THÊM DÒNG NÀY
+                    />
+                )}
+
+                {/* === THÊM PHẦN NÀY: VIEW IMAGE SEARCH === */}
+                {view === 'imageSearch' && (
+                    <ImageSearchUI
+                        onBack={() => setView('home')}
+                        onOpenShop={(id) => openDetail(id)} // Truyền hàm openDetail vào đây
+                    />
+                )}
+                {/* === VIEW: FORGOT PASSWORD === */}
+                {view === 'forgotPassword' && (
+                    <ForgotPasswordForm
+                        onClose={() => setView('home')}
+                        onSwitchToLogin={() => setView('login')}
+                    />
+                )}
+
+                {/* === VIEW: USER PROFILE === */}
+                {view === 'profile' && user && (
+                    <UserProfileUI
+                        user={user}
+                        setUser={setUser}
+                        onLogout={async () => {
+                            await fetch(`${API_BASE}/api/logout`, { method: 'POST', credentials: 'include' });
+                            setUser(null);
+                            setView('home');
+                        }}
+                    />
+                )}
+
+                {/* === LOGIN / REGISTER (Cập nhật logic chuyển forgot password) === */}
+                {(view === 'login' || view === 'register') && (
+                    <AuthForm
+                        type={view}
+                        onSwitch={(target) => {
+                            // Nếu target là string đặc biệt 'forgot-password' thì setView
+                            if (target === 'forgot-password') setView('forgotPassword');
+                            else setView(view === 'login' ? 'register' : 'login');
+                        }}
+                        onLogin={handleLogin}
+                        onRegister={handleRegister}
+                        onClose={() => setView('home')}
+                    />
                 )}
 
                 {/* === VIEW: DETAIL (Giao diện Professional) === */}
@@ -718,36 +1759,11 @@ export default function App() {
                                         <span style={{ fontWeight: 'bold', color: '#333', fontSize: '14px' }}>
                                             {selectedShop.rating || 5.0} / 5.0
                                         </span>
-
                                         <span style={{ color: '#ccc' }}>•</span>
                                         <span style={{ color: '#666', fontSize: '14px', textDecoration: 'underline', cursor: 'pointer' }}>Xem {shopComments.length} đánh giá</span>
-
                                     </div>
                                 </div>
-                                {/* --- CODE HIỂN THỊ ITEMS MỚI --- */}
-                                {selectedShop.items && (
-                                    <div style={{ marginTop: '15px', borderTop: '1px dashed #eee', paddingTop: '15px' }}>
-                                        <div style={{ fontSize: '13px', color: '#888', marginBottom: '8px', fontWeight: '600', textTransform: 'uppercase' }}>
-                                            <ShoppingBag size={14} style={{ marginRight: '5px', verticalAlign: '-2px' }}/> 
-                                            Sản phẩm nổi bật:
-                                        </div>
-                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                                            {/* Tự động xử lý dù items là Mảng hay Chuỗi ngăn cách dấu phẩy */}
-                                            {(Array.isArray(selectedShop.items) 
-                                                ? selectedShop.items 
-                                                : String(selectedShop.items).replace(/[\[\]']/g, "").split(',')
-                                            ).map((item, idx) => (
-                                                <span key={idx} style={{ 
-                                                    background: '#f7f5f0', color: '#4e382d', padding: '6px 12px', 
-                                                    borderRadius: '6px', fontSize: '14px', fontWeight: '600', border: '1px solid #e0dcd5' 
-                                                }}>
-                                                    {item.trim()}
-                                                </span>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
-                                {/* --- HẾT CODE ITEMS --- */}
+
                                 {/* Cột Phải: Giá & Trạng thái */}
                                 <div className="dh-price-box">
                                     <div style={{ fontSize: '13px', color: '#666', marginBottom: '5px' }}>Giá tham khảo</div>
@@ -763,59 +1779,64 @@ export default function App() {
 
                             {/* 2. BẢN ĐỒ FULL-WIDTH VỚI LEAFLET */}
                             <div className="map-section-pro" style={{ height: '500px', width: '100%', zIndex: 0 }}>
-                                {selectedShop.lat && selectedShop.lon ? (
+                                {selectedShop.lat && selectedShop.lon && !isNaN(selectedShop.lat) ? (
                                     <MapContainer
-                                        center={[selectedShop.lat, selectedShop.lon]}
-                                        zoom={15}
+                                        /* QUAN TRỌNG: Key giúp React huỷ map cũ và vẽ map mới khi ID thay đổi */
+                                        key={selectedShop.id}
+
+                                        /* Ép kiểu số thực để tránh lỗi */
+                                        center={[parseFloat(selectedShop.lat), parseFloat(selectedShop.lon)]}
+                                        
+                                        zoom={16} // Zoom gần shop hơn một chút
                                         scrollWheelZoom={false}
                                         style={{ height: "100%", width: "100%" }}
                                     >
                                         <TileLayer
-                                            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                                            attribution='© OpenStreetMap'
                                             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                                         />
 
-                                        {/* Marker của Shop */}
+                                        {/* LUÔN LUÔN HIỂN THỊ MARKER CỬA HÀNG */}
                                         <Marker position={[selectedShop.lat, selectedShop.lon]}>
                                             <Popup>
                                                 <b>{selectedShop.name}</b><br />{selectedShop.address}
                                             </Popup>
                                         </Marker>
 
-                                        {/* Nếu có vị trí User (đang demo HCM), vẽ đường đi */}
-                                        {/* Lưu ý: Bạn cần lấy toạ độ thật của user từ state filters.lat/lon hoặc hardcode test */}
-                                        {(filters.lat || 10.762622) && (filters.lon || 106.660172) && (
+                                        {/* LOGIC HIỂN THỊ THEO TRẠNG THÁI */}
+                                        {myLocation ? (
+                                            // TRƯỜNG HỢP 1: ĐÃ CÓ GPS (Đã bấm nút chỉ đường)
                                             <>
-                                                <Marker position={[filters.lat || 10.762622, filters.lon || 106.660172]}>
+                                                <Marker position={[myLocation.lat, myLocation.lon]}>
                                                     <Popup>Vị trí của bạn</Popup>
                                                 </Marker>
+
+                                                {/* Vẽ đường đi */}
                                                 <RoutingMachine
-                                                    userLat={filters.lat || 10.762622}
-                                                    userLon={filters.lon || 106.660172}
+                                                    userLat={myLocation.lat}
+                                                    userLon={myLocation.lon}
                                                     shopLat={selectedShop.lat}
                                                     shopLon={selectedShop.lon}
                                                 />
+
+                                                {/* Nút về vị trí hiện tại (Chỉ hiện khi đã có GPS) */}
+                                                <RecenterControl
+                                                    lat={myLocation.lat}
+                                                    lon={myLocation.lon}
+                                                />
                                             </>
+                                        ) : (
+                                            // TRƯỜNG HỢP 2: CHƯA CÓ GPS (Mới vào xem)
+                                            // Hiển thị nút "Chỉ đường tới đây"
+                                            <DirectionsControl onStart={handleStartNavigation} />
                                         )}
+
                                     </MapContainer>
                                 ) : (
-                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#999' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#999', background: '#eee' }}>
                                         Không có dữ liệu bản đồ
                                     </div>
                                 )}
-
-                                {/* Nút chỉ đường Google Maps vẫn giữ lại để dự phòng */}
-                                <div style={{ position: 'absolute', bottom: '20px', right: '20px', zIndex: 400 }}>
-                                    <a
-                                        href={`https://www.google.com/maps/dir/?api=1&destination=${selectedShop.lat},${selectedShop.lon}`}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="btn-booking-primary"
-                                        style={{ boxShadow: '0 4px 15px rgba(0,0,0,0.3)', padding: '10px 20px', fontSize: '14px', background: 'white', color: '#333', border: '1px solid #ccc' }}
-                                    >
-                                        <Navigation size={16} /> Mở Google Maps
-                                    </a>
-                                </div>
                             </div>
 
                             {/* 3. THANH TÁC VỤ (ACTION BAR) */}
@@ -892,6 +1913,15 @@ export default function App() {
                 )}
             </main>
 
+
+            {/* --- THÊM ĐOẠN NÀY VÀO: TRANG CHAT FULL MÀN HÌNH --- */}
+            {view === 'chat' && (
+                <ChatPageUI
+                    user={user}
+                    onBack={() => setView('home')}
+                />
+            )}
+
             {/* --- CHATBOX AI GEMINI --- */}
             {!showChat && (
                 <div className="chat-btn" onClick={() => setShowChat(true)}>
@@ -901,7 +1931,7 @@ export default function App() {
             {showChat && (
                 <div className="chat-window">
                     <div className="chat-header">
-                        <span>Trợ lý Souvenir AI</span>
+                        <span>Trợ lý SLocal AI</span>
                         <div style={{ cursor: 'pointer' }} onClick={() => setShowChat(false)}><X size={20} /></div>
                     </div>
                     <div className="chat-content">
@@ -917,294 +1947,686 @@ export default function App() {
                     </div>
                 </div>
             )}
+
+
+
+
+
+            {/* --- PHẦN ABOUT US & FOOTER (MỚI THÊM) --- */}
+            <div className="about-section">
+                <div className="container">
+                    <div className="about-grid">
+                        {/* Cột trái: Câu chuyện */}
+                        <div>
+                            <h2 className="about-title">About Us</h2>
+                            <h3 style={{ fontFamily: 'Roboto Slab', color: '#333', marginTop: 0 }}>
+                                Kết nối văn hóa qua từng món quà!
+                            </h3>
+                            <p className="about-desc">
+                                SLocal không chỉ là ứng dụng tìm kiếm cửa hàng thông thường, mà là người bạn đồng hành giúp du khách khám phá những nét đẹp văn hóa tiềm ẩn.
+                                Chúng tôi tin rằng mỗi món quà lưu niệm đều mang trong mình một câu chuyện riêng của vùng đất đó.
+                                Với sự hỗ trợ của trí tuệ nhân tạo AI tích hợp trong các tính năng, Nhóm 6 mong muốn mang lại trải nghiệm du lịch thông minh và gần gũi nhất đến với người dùng.
+                            </p>
+                            <div style={{ display: 'flex', gap: '15px' }}>
+
+                            </div>
+                        </div>
+
+                        {/* Cột phải: Tính năng nổi bật */}
+                        <div className="feature-box-grid">
+                            <div className="feature-mini-card">
+                                <div style={{ color: 'var(--accent)', marginBottom: '10px' }}><Camera size={32} /></div>
+                                <h4 style={{ margin: '5px 0', color: 'var(--primary)' }}>AI Vision</h4>
+                                <small style={{ color: '#666' }}>Tìm kiếm bằng hình ảnh</small>
+                            </div>
+                            <div className="feature-mini-card">
+                                <div style={{ color: 'var(--accent)', marginBottom: '10px' }}><MapPin size={32} /></div>
+                                <h4 style={{ margin: '5px 0', color: 'var(--primary)' }}>Bản đồ số</h4>
+                                <small style={{ color: '#666' }}>Định vị shop gần bạn</small>
+                            </div>
+                            <div className="feature-mini-card">
+                                <div style={{ color: 'var(--accent)', marginBottom: '10px' }}><MessageCircle size={32} /></div>
+                                <h4 style={{ margin: '5px 0', color: 'var(--primary)' }}>Trợ lý ảo</h4>
+                                <small style={{ color: '#666' }}>Tư vấn 24/7</small>
+                            </div>
+                            <div className="feature-mini-card">
+                                <div style={{ color: 'var(--accent)', marginBottom: '10px' }}><Gift size={32} /></div>
+                                <h4 style={{ margin: '5px 0', color: 'var(--primary)' }}>Đổi quà</h4>
+                                <small style={{ color: '#666' }}>Tích điểm nhận voucher</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* FOOTER CREDIT */}
+            <div className="footer-credit">
+                <div className="container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                        © 2025 <b>SLocal Project</b>. All rights reserved.
+                    </div>
+                    <div>
+                        Phát triển bởi <b>Nhóm 6</b>
+                    </div>
+                </div>
+            </div>
+            {/* ------------------------------------------ */}
+
+            
         </div>
     );
 }
 
 // --- SUB-COMPONENT: CHALLENGE UI ---
-function ChallengeUI({ user, onLoginRequest }) {
-    const [challenges, setChallenges] = useState([]);
-    const [shops, setShops] = useState([]);
+// --- SUB-COMPONENT: CHALLENGE UI (UPDATED PRO) ---
+function ChallengeUI({ user, onLoginRequest, onBack }) {
+    const [activeTab, setActiveTab] = useState('discover'); // 'discover', 'my-quest', 'rewards'
+    const [loading, setLoading] = useState(false);
+
+    // Data State
+    const [videos, setVideos] = useState([]);
+    const [myQuests, setMyQuests] = useState([]);
     const [vouchers, setVouchers] = useState([]);
     const [userPoints, setUserPoints] = useState(0);
-    const [loading, setLoading] = useState(true);
+    const [userLocation, setUserLocation] = useState({ lat: null, lon: null });
+    const [navigatingQuest, setNavigatingQuest] = useState(null);
+    // Lấy vị trí GPS của người dùng
+    const getLocation = (callback) => {
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+                (pos) => {
+                    const coords = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+                    setUserLocation(coords);
+                    if (callback) callback(coords);
+                },
+                (err) => {
+                    alert("Vui lòng bật GPS để sử dụng tính năng Check-in và tìm kiếm.");
+                    console.error(err);
+                }
+            );
+        } else {
+            alert("Trình duyệt không hỗ trợ Geolocation.");
+        }
+    };
 
-    const [selectedShopId, setSelectedShopId] = useState('');
-    const [receiptFile, setReceiptFile] = useState(null);
-    const [uploading, setUploading] = useState(false);
+    const startNavigation = (quest) => {
+        // 1. Lấy vị trí hiện tại mới nhất
+        getLocation((coords) => {
+            // 2. Lưu quest cần đi vào state để hiển thị bản đồ
+            setNavigatingQuest({
+                ...quest,
+                userLat: coords.lat,
+                userLon: coords.lon
+            });
+        });
+    };
 
+    // 1. Initial Load
     useEffect(() => {
-        // Giả lập lấy toạ độ hiện tại (HCM)
-        const userLat = 10.762622;
-        const userLon = 106.660172;
-
-        fetch(`${API_BASE}/api/challenge/start`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ lat: userLat, lon: userLon, radius_km: 10 })
-        })
-            .then(res => res.json())
-            .then(data => {
-                setChallenges(data.videos || []);
-                setShops(data.nearby_shops || []);
-                setLoading(false);
-            })
-            .catch(err => { console.error(err); setLoading(false); });
+        getLocation((coords) => {
+            fetchVideos(coords); // Load video ngay khi có toạ độ
+        });
 
         if (user) {
-            fetch(`${API_BASE}/api/challenge/vouchers`)
-                .then(res => res.json())
-                .then(data => {
-                    if (data.success) {
-                        setUserPoints(data.points);
-                        setVouchers(data.suggestions);
-                    }
-                });
+            fetchMyQuests();
+            fetchVouchers();
         }
     }, [user]);
 
-    const handleComplete = async () => {
-        if (!user) return onLoginRequest();
-        if (!selectedShopId || !receiptFile) return alert("Vui lòng chọn shop và ảnh hóa đơn");
+    // --- API CALLS ---
 
-        setUploading(true);
-        const fd = new FormData();
-        fd.append('shop_id', selectedShopId);
-        fd.append('user_lat', 10.762622); // Demo toạ độ
-        fd.append('user_lon', 106.660172);
-        fd.append('receipt', receiptFile);
+    // Lấy danh sách Video (Tab Discover)
+    const fetchVideos = async (coords = userLocation) => {
+        setLoading(true);
+        try {
+            const res = await fetch(`${API_BASE}/api/challenge/videos`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    lat: coords.lat,
+                    lon: coords.lon,
+                    radius: 20 // Lọc trong 20km
+                }),
+                credentials: 'include'
+            });
+            const data = await res.json();
+            setVideos(data.videos || []);
+        } catch (e) { console.error(e); }
+        setLoading(false);
+    };
+
+    // Lấy danh sách nhiệm vụ của tôi (Tab My Quest)
+    const fetchMyQuests = async () => {
+        if (!user) return;
+        try {
+            // Gửi kèm toạ độ để backend tính khoảng cách realtime
+            const url = userLocation.lat
+                ? `${API_BASE}/api/challenge/current?lat=${userLocation.lat}&lon=${userLocation.lon}`
+                : `${API_BASE}/api/challenge/current`;
+
+            const res = await fetch(url, { headers: { 'Authorization': 'Bearer ...' }, credentials: 'include' }); // Nếu có token
+            const data = await res.json();
+            setMyQuests(data.shops || []);
+        } catch (e) { console.error(e); }
+    };
+
+    // Lấy Voucher & Điểm (Tab Rewards)
+    const fetchVouchers = async () => {
+        if (!user) return;
+        try {
+            const res = await fetch(`${API_BASE}/api/challenge/vouchers`, { credentials: 'include'});
+            const data = await res.json();
+            setVouchers(data.vouchers || []);
+            setUserPoints(data.user_points || 0);
+        } catch (e) { console.error(e); }
+    };
+
+    // --- ACTIONS ---
+
+    // Thêm Shop vào danh sách (Gọi API /add)
+    const handleAcceptChallenge = async (shopId) => {
+        if (!user) return onLoginRequest();
+        if (myQuests.length >= 3) return alert("Bạn chỉ được nhận tối đa 3 thử thách cùng lúc!");
 
         try {
-            const res = await fetch(`${API_BASE}/api/challenge/complete`, { method: 'POST', body: fd });
+            const res = await fetch(`${API_BASE}/api/challenge/add`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ shop_id: shopId }),
+                credentials: 'include'
+            });
             const data = await res.json();
-            if (data.success) {
-                alert(data.message);
-                setUserPoints(data.new_points);
-                setReceiptFile(null);
+            if (res.ok) {
+                alert("Đã nhận thử thách! Hãy chuyển sang tab 'Thử thách của tôi' để check-in.");
+                fetchMyQuests();
+                setActiveTab('my-quest');
             } else {
                 alert(data.error);
             }
-        } catch (e) { alert("Lỗi hệ thống"); }
-        setUploading(false);
+        } catch (e) { alert("Lỗi kết nối"); }
+    };
+
+    // Xóa Shop khỏi danh sách (Gọi API /remove)
+    const handleGiveUp = async (shopId) => {
+        if (!window.confirm("Bạn có chắc muốn huỷ thử thách này?")) return;
+        try {
+            const res = await fetch(`${API_BASE}/api/challenge/remove`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ shop_id: shopId }),
+                credentials: 'include'
+            });
+            if (res.ok) fetchMyQuests();
+        } catch (e) { alert("Lỗi kết nối"); }
+    };
+
+    // Check-in GPS (Gọi API /checkin)
+    const handleCheckIn = () => {
+        getLocation(async (coords) => {
+            const fd = new FormData();
+            fd.append('user_lat', coords.lat);
+            fd.append('user_lon', coords.lon);
+
+            try {
+                const res = await fetch(`${API_BASE}/api/challenge/checkin`, {
+                    method: 'POST',
+                    body: fd,
+                    credentials: 'include'
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    alert(` ${data.message}`);
+                    fetchMyQuests(); // Cập nhật lại list (shop đã checkin sẽ biến mất hoặc đổi trạng thái)
+                    fetchVouchers(); // Cập nhật điểm
+                } else {
+                    alert(` ${data.error}`);
+                }
+            } catch (e) { alert("Lỗi hệ thống Check-in"); }
+        });
+    };
+
+    // Đổi Voucher (Gọi API /redeem)
+    const handleRedeem = async (voucherId) => {
+        if (!window.confirm("Bạn muốn dùng điểm để đổi voucher này?")) return;
+        try {
+            const res = await fetch(`${API_BASE}/api/challenge/redeem`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ voucher_id: voucherId }),
+                credentials: 'include'
+            });
+            const data = await res.json();
+            if (data.success) {
+                alert(data.message);
+                fetchVouchers(); // Cập nhật lại điểm
+            } else {
+                alert(data.error);
+            }
+        } catch (e) { alert("Lỗi đổi quà"); }
     };
 
     return (
         <div className="fade-in">
+            
+            {/* HERO HEADER */}
             <div className="hero-header challenge-mode">
                 <div className="container">
-                    <h1>Săn Deal - Nhận Quà Địa Phương</h1>
-                    <p>Check-in tại các địa điểm, quay video hoặc mua sắm để tích điểm đổi voucher.</p>
+                    <h1>Du lịch & Săn Quà Địa Phương</h1>
+                    <p>Khám phá địa điểm qua video - Check-in nhận điểm - Đổi quà hấp dẫn</p>
+
                     {user && (
-                        <div style={{ marginTop: '20px' }}>
-                            <div className="points-badge">
-                                <Trophy size={18} /> Điểm của bạn: {userPoints}
-                            </div>
+                        <div style={{ marginTop: '20px', display: 'inline-flex', alignItems: 'center', background: 'rgba(0,0,0,0.5)', padding: '10px 20px', borderRadius: '30px', backdropFilter: 'blur(5px)' }}>
+                            <Trophy color="#FFD700" size={24} style={{ marginRight: '10px' }} />
+                            <span style={{ color: 'white', fontSize: '18px', fontWeight: 'bold' }}>
+                                Điểm của bạn: {userPoints}
+                            </span>
                         </div>
                     )}
                 </div>
             </div>
 
-            <div className="container main-layout">
-                <div className="content-list">
-                    <h2 style={{ fontFamily: 'Roboto Slab', color: 'var(--primary)', marginBottom: '20px' }}>
-                        <Video style={{ verticalAlign: 'middle' }} /> Thử thách đang diễn ra
-                    </h2>
+            <div className="container" style={{ marginTop: '30px', minHeight: '600px' }}>
+                {/* === THÊM ĐOẠN NÀY VÀO ĐẦU TIÊN === */}
+                <div className="container" style={{ marginTop: '20px', marginBottom: '10px' }}>
+                    <button className="btn-back" onClick={onBack}>
+                        <ChevronRight transform="rotate(180)" size={20} /> Quay lại
+                    </button>
+                </div>
+                {/* TABS NAVIGATION */}
+                <div className="challenge-tabs">
+                    <button
+                        className={`tab-btn ${activeTab === 'discover' ? 'active' : ''}`}
+                        onClick={() => setActiveTab('discover')}
+                    >
+                        <Video size={18} style={{ marginRight: '8px', verticalAlign: 'text-bottom' }} />
+                        Khám phá
+                    </button>
+                    <button
+                        className={`tab-btn ${activeTab === 'my-quest' ? 'active' : ''}`}
+                        onClick={() => {
+                            if (!user) return onLoginRequest();
+                            setActiveTab('my-quest');
+                            fetchMyQuests();
+                        }}
+                    >
+                        <MapPin size={18} style={{ marginRight: '8px', verticalAlign: 'text-bottom' }} />
+                        Nhiệm vụ của tôi ({myQuests.length}/3)
+                    </button>
+                    <button
+                        className={`tab-btn ${activeTab === 'rewards' ? 'active' : ''}`}
+                        onClick={() => {
+                            if (!user) return onLoginRequest();
+                            setActiveTab('rewards');
+                            fetchVouchers();
+                        }}
+                    >
+                        <Gift size={18} style={{ marginRight: '8px', verticalAlign: 'text-bottom' }} />
+                        Kho Quà
+                    </button>
+                </div>
 
-                    {loading ? <div>Đang tải...</div> : (
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '20px' }}>
-                            {challenges.length === 0 && <p>Chưa có video thử thách nào.</p>}
-                            {challenges.map((vid, idx) => (
-                                <div key={idx} className="challenge-card">
+                {/* --- TAB CONTENT: DISCOVER --- */}
+                {activeTab === 'discover' && (
+                    <div className="fade-in">
+                        {loading && <div style={{ textAlign: 'center' }}>Đang tải video quanh bạn...</div>}
+                        <div className="video-feed-grid">
+                            {videos.map(vid => (
+                                <div key={vid.video_id} className="video-card-pro">
+                                    {/* Video Frame */}
                                     <iframe
-                                        src={vid.embed}
-                                        title={vid.id}
-                                        className="video-frame"
+                                        src={vid.embed_url}
+                                        className="vc-frame"
+                                        title={vid.video_id}
                                         allowFullScreen
-                                        style={{ border: 'none' }}
                                     ></iframe>
-                                    <div className="challenge-body">
-                                        <h3 style={{ margin: '0 0 5px', fontSize: '18px' }}>Thử thách #{idx + 1}</h3>
-                                        <p style={{ fontSize: '13px', color: '#555' }}>Ghé thăm và check-in để nhận điểm.</p>
+
+                                    {/* Info Body */}
+                                    <div className="vc-info">
+                                        <h3 className="vc-shop-name">{vid.shop.name}</h3>
+                                        <div style={{ fontSize: '13px', color: '#666', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                            <MapPin size={14} />
+                                            {vid.shop.address}
+                                        </div>
+
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '15px' }}>
+                                            <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#008234', background: '#e6f6eb', padding: '4px 8px', borderRadius: '4px' }}>
+                                                Cách bạn {vid.shop.distance_km} km
+                                            </div>
+                                            <button
+                                                className="btn-booking-primary"
+                                                style={{ padding: '8px 16px', fontSize: '13px', width: 'auto' }}
+                                                onClick={() => handleAcceptChallenge(vid.shop.id)}
+                                                disabled={myQuests.some(q => q.shop_id === vid.shop.id)}
+                                            >
+                                                {myQuests.some(q => q.shop_id === vid.shop.id) ? 'Đã nhận' : 'Nhận thử thách'}
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
                             ))}
                         </div>
-                    )}
-                </div>
+                    </div>
+                )}
 
-                <div className="sidebar" style={{ width: '350px' }}>
-                    <div className="price-box-sticky">
-                        <h4><UploadCloud size={20} style={{ marginRight: '8px', verticalAlign: 'middle' }} /> Nộp minh chứng</h4>
+                {/* --- TAB CONTENT: MY QUESTS (ĐÃ CẬP NHẬT LOGIC MAP) --- */}
+                {activeTab === 'my-quest' && (
+                    <div className="fade-in">
 
-                        {!user ? (
-                            <div style={{ textAlign: 'center', padding: '20px 0' }}>
-                                <p>Đăng nhập để tham gia thử thách</p>
-                                <button className="btn-booking-primary" onClick={onLoginRequest}>Đăng nhập ngay</button>
+                        {/* TRƯỜNG HỢP 1: ĐANG XEM BẢN ĐỒ CHỈ ĐƯỜNG */}
+                        {navigatingQuest ? (
+                            <div className="fade-in">
+                                <button
+                                    className="btn-back"
+                                    onClick={() => setNavigatingQuest(null)}
+                                    style={{ marginBottom: '15px', display: 'flex', alignItems: 'center', gap: '5px' }}
+                                >
+                                    <ChevronRight transform="rotate(180)" size={16} /> Quay lại danh sách nhiệm vụ
+                                </button>
+
+                                <div className="map-section-pro" style={{ height: '500px', borderRadius: '12px', overflow: 'hidden', border: '1px solid #ddd' }}>
+                                    <MapContainer
+                                        center={[navigatingQuest.lat, navigatingQuest.lon]}
+                                        zoom={15}
+                                        scrollWheelZoom={true}
+                                        style={{ height: "100%", width: "100%" }}
+                                    >
+                                        <TileLayer attribution='© OpenStreetMap' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+
+                                        {/* Marker Shop */}
+                                        <Marker position={[navigatingQuest.lat, navigatingQuest.lon]}>
+                                            <Popup><b>{navigatingQuest.name}</b><br />{navigatingQuest.address}</Popup>
+                                        </Marker>
+
+                                        {/* Marker User */}
+                                        <Marker position={[navigatingQuest.userLat, navigatingQuest.userLon]}>
+                                            <Popup>Vị trí của bạn</Popup>
+                                        </Marker>
+
+                                        {/* Vẽ đường đi */}
+                                        <RoutingMachine
+                                            userLat={navigatingQuest.userLat}
+                                            userLon={navigatingQuest.userLon}
+                                            shopLat={navigatingQuest.lat}
+                                            shopLon={navigatingQuest.lon}
+                                        />
+
+                                        {/* Nút về vị trí */}
+                                        <RecenterControl lat={navigatingQuest.userLat} lon={navigatingQuest.userLon} />
+                                    </MapContainer>
+                                </div>
+
+                                <div style={{ marginTop: '20px', padding: '20px', background: '#f0fff4', border: '1px solid #48bb78', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '15px' }}>
+                                    <Navigation size={32} color="#48bb78" />
+                                    <div>
+                                        <h4 style={{ margin: '0 0 5px', color: '#2f855a' }}>Đang dẫn đường tới: {navigatingQuest.name}</h4>
+                                        <p style={{ margin: 0, fontSize: '14px', color: '#555' }}>Hãy di chuyển đến địa điểm này. Khi đến nơi (cách dưới 500m), hãy quay lại màn hình này và nhấn nút <b>"Check-in tại đây"</b> phía trên.</p>
+                                    </div>
+                                </div>
                             </div>
                         ) : (
-                            <div>
-                                <div style={{ marginBottom: '15px' }}>
-                                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: '600' }}>Chọn cửa hàng bạn đang đứng:</label>
-                                    <select
-                                        className="modern-input"
-                                        style={{ margin: 0 }}
-                                        value={selectedShopId}
-                                        onChange={e => setSelectedShopId(e.target.value)}
-                                    >
-                                        <option value="">-- Chọn Shop --</option>
-                                        {shops.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                                    </select>
+
+                            /* TRƯỜNG HỢP 2: DANH SÁCH NHIỆM VỤ (LIST VIEW) */
+                            <>
+                                <div className="progress-header">
+                                    <h2 style={{ fontFamily: 'Roboto Slab', color: 'var(--primary)', margin: 0 }}>Tiến độ hành trình</h2>
+                                    <p style={{ color: '#666' }}>Hoàn thành check-in tại các địa điểm để nhận điểm thưởng.</p>
+                                    <div style={{ maxWidth: '400px', margin: '0 auto' }}>
+                                        <div className="progress-bar-bg">
+                                            <div className="progress-bar-fill" style={{ width: `${(myQuests.length / 3) * 100}%` }}></div>
+                                        </div>
+                                        <small>{myQuests.length}/3 Thử thách đang kích hoạt</small>
+                                    </div>
                                 </div>
 
-                                <div
-                                    className="upload-box-modern"
-                                    style={{ padding: '30px 10px', marginBottom: '15px' }}
-                                    onClick={() => document.getElementById('receipt-up').click()}
-                                >
-                                    {receiptFile ? (
-                                        <div style={{ color: 'green', fontWeight: 'bold' }}><CheckCircle size={30} /> {receiptFile.name}</div>
-                                    ) : (
-                                        <div>
-                                            <Camera size={30} style={{ opacity: 0.5 }} />
-                                            <p style={{ margin: '5px 0', fontSize: '13px' }}>Chụp ảnh hóa đơn</p>
+                                <div className="quest-list">
+                                    {myQuests.length === 0 ? (
+                                        <div style={{ textAlign: 'center', padding: '40px', color: '#999', border: '2px dashed #eee', borderRadius: '12px' }}>
+                                            <MapPin size={40} style={{ opacity: 0.3, marginBottom: '10px' }} />
+                                            <p>Bạn chưa nhận thử thách nào.</p>
+                                            <button className="btn-secondary" onClick={() => setActiveTab('discover')}>Tìm thử thách ngay</button>
                                         </div>
+                                    ) : (
+                                        <>
+                                            <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+                                                <button className="btn-booking-primary" style={{ margin: '0 auto', padding: '15px 40px', fontSize: '18px', boxShadow: '0 4px 15px rgba(78, 56, 45, 0.4)' }} onClick={handleCheckIn}>
+                                                    <MapPin size={20} /> CHECK-IN TẠI ĐÂY
+                                                </button>
+                                            </div>
+
+                                            {myQuests.map((quest) => (
+                                                <div key={quest.shop_id} className="quest-card">
+                                                    <div className="quest-icon">
+                                                        <ShoppingBag size={24} />
+                                                    </div>
+                                                    <div className="quest-details">
+                                                        <h3 style={{ margin: '0 0 5px', fontFamily: 'Roboto Slab', color: 'var(--primary)' }}>{quest.name}</h3>
+                                                        <p style={{ margin: '0', fontSize: '14px', color: '#555' }}>{quest.address}</p>
+                                                        <div style={{ marginTop: '8px', display: 'flex', gap: '10px', fontSize: '13px' }}>
+                                                            <span style={{ color: 'var(--accent)', fontWeight: 'bold' }}>Khoảng cách: {quest.distance_km} km</span>
+                                                            <span style={{ color: '#008234' }}>+15 điểm</span>
+                                                        </div>
+                                                    </div>
+                                                    <div className="quest-actions">
+                                                        <button className="btn-secondary" style={{ color: '#e53e3e', borderColor: '#e53e3e', fontSize: '13px' }} onClick={() => handleGiveUp(quest.shop_id)}>Huỷ bỏ</button>
+
+                                                        {/* --- NÚT CHỈ ĐƯỜNG ĐÃ SỬA --- */}
+                                                        <button
+                                                            className="btn-secondary"
+                                                            style={{ color: '#007bff', borderColor: '#007bff', fontWeight: 'bold' }}
+                                                            onClick={() => startNavigation(quest)}
+                                                        >
+                                                            <Navigation size={14} style={{ marginRight: '5px' }} /> Chỉ đường
+                                                        </button>
+                                                        {/* --------------------------- */}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </>
                                     )}
                                 </div>
-                                <input id="receipt-up" type="file" hidden accept="image/*" onChange={e => setReceiptFile(e.target.files[0])} />
-
-                                <button className="btn-booking-primary" onClick={handleComplete} disabled={uploading}>
-                                    {uploading ? 'Đang gửi...' : 'Hoàn thành & Nhận điểm'}
-                                </button>
-                            </div>
-                        )}
-
-                        {/* VOUCHER LIST */}
-                        {vouchers.length > 0 && (
-                            <div style={{ marginTop: '30px', borderTop: '1px solid #eee', paddingTop: '20px' }}>
-                                <h4>Voucher đổi thưởng</h4>
-                                {vouchers.map((v, i) => (
-                                    <div key={i} className="voucher-ticket">
-                                        <Gift size={24} color="var(--primary)" />
-                                        <div>
-                                            <div style={{ fontWeight: 'bold', color: 'var(--primary)' }}>{v.code}</div>
-                                            <div style={{ fontSize: '12px', color: '#666' }}>{v.description}</div>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
+                            </>
                         )}
                     </div>
-                </div>
+                )}
+
+                {/* --- TAB CONTENT: REWARDS --- */}
+                {activeTab === 'rewards' && (
+                    <div className="fade-in">
+                        <div style={{ textAlign: 'center', marginBottom: '40px' }}>
+                            <h2 style={{ fontFamily: 'Dancing Script', fontSize: '42px', color: 'var(--accent)' }}>Kho Quà Tặng</h2>
+                            <p>Sử dụng điểm tích lũy của bạn để đổi lấy những ưu đãi độc quyền.</p>
+                        </div>
+
+                        <div className="reward-grid">
+                            {vouchers.map(v => (
+                                <div key={v.id} className="voucher-ticket-pro">
+                                    <div className="v-left">
+                                        <h3 style={{ margin: '0 0 5px', color: 'var(--primary)' }}>{v.code}</h3>
+                                        <p style={{ margin: 0, fontSize: '13px', color: '#666' }}>{v.description}</p>
+                                        <div style={{ marginTop: '10px', fontSize: '12px', color: '#999' }}>
+                                            <CheckCircle size={12} style={{ marginRight: '4px' }} /> Có hiệu lực ngay
+                                        </div>
+                                    </div>
+                                    <div className="v-right">
+                                        <div className="point-cost">{v.point_cost}</div>
+                                        <div style={{ fontSize: '11px', textTransform: 'uppercase', marginBottom: '8px' }}>Điểm</div>
+                                        <button
+                                            style={{
+                                                background: userPoints >= v.point_cost ? 'var(--primary)' : '#ccc',
+                                                color: 'white', border: 'none', padding: '5px 12px',
+                                                borderRadius: '4px', cursor: userPoints >= v.point_cost ? 'pointer' : 'not-allowed',
+                                                fontSize: '12px', fontWeight: 'bold'
+                                            }}
+                                            onClick={() => userPoints >= v.point_cost && handleRedeem(v.id)}
+                                        >
+                                            Đổi ngay
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     );
 }
 
 // --- SUB-COMPONENT: IMAGE SEARCH ---
-function ImageSearchUI({ onBack }) {
+// --- SUB-COMPONENT: IMAGE SEARCH (GIAO DIỆN MỚI) ---
+function ImageSearchUI({ onBack, onOpenShop }) {
     const [file, setFile] = useState(null);
     const [preview, setPreview] = useState(null);
     const [result, setResult] = useState(null);
     const [loading, setLoading] = useState(false);
 
+    // Xử lý khi chọn ảnh
+    const handleFileChange = (e) => {
+        if (e.target.files[0]) {
+            setFile(e.target.files[0]);
+            setPreview(URL.createObjectURL(e.target.files[0]));
+            setResult(null); // Reset kết quả cũ
+        }
+    };
+
+    // Gọi API phân tích
     const handleAnalyze = async () => {
         if (!file) return;
         setLoading(true);
-        const fd = new FormData(); fd.append('image', file);
+        const fd = new FormData();
+        fd.append('image', file);
         try {
-            const res = await fetch(`${API_BASE}/api/search-by-image`, { method: 'POST', body: fd });
+            const res = await fetch(`${API_BASE}/api/search-by-image`, { method: 'POST', body: fd, credentials: 'include' });
             const data = await res.json();
             setResult(data);
         } catch { alert('Lỗi xử lý ảnh'); }
         setLoading(false);
     };
 
+    // Hàm reset để tìm ảnh khác
+    const handleReset = () => {
+        setFile(null);
+        setPreview(null);
+        setResult(null);
+    };
+
     return (
-        <div className="container fade-in" style={{ paddingTop: '40px', paddingBottom: '60px' }}>
-            <button className="btn-back" onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                <ChevronRight transform="rotate(180)" size={16} /> Quay lại
-            </button>
+        <div className="container fade-in" style={{ paddingTop: '30px', paddingBottom: '80px' }}>
+            {/* Header: Nút Back & Tiêu đề */}
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: '30px' }}>
+                {/* THÊM style={{ marginBottom: 0, marginRight: '15px' }} ĐỂ CĂN GIỮA */}
+                <button className="btn-back" onClick={onBack} style={{ marginBottom: 0, marginRight: '15px' }}>
+                    <ChevronRight transform="rotate(180)" size={20} /> Quay lại
+                </button>
 
-            <h2 style={{ fontFamily: 'Roboto Slab', fontSize: '28px', color: 'var(--primary)', marginBottom: '30px', textAlign: 'center' }}>
-                Tìm kiếm bằng hình ảnh
-            </h2>
+                <h2 style={{ fontFamily: 'Roboto Slab', fontSize: '28px', color: 'var(--primary)', margin: 0, lineHeight: '1' }}>
+                    Tìm kiếm bằng hình ảnh
+                </h2>
+            </div>
 
-            <div className="detail-content-layout">
-                <div className="dcl-main">
+            {/* --- TRẠNG THÁI 1: CHƯA CÓ KẾT QUẢ (Hiển thị khung Upload to) --- */}
+            {!result && (
+                <div style={{ maxWidth: '600px', margin: '0 auto' }}>
                     <div
                         className="upload-box-modern"
                         onClick={() => document.getElementById('img-up').click()}
+                        style={{ background: 'white', border: '2px dashedvar(--accent)', minHeight: '300px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}
                     >
                         {preview ? (
-                            <div style={{ position: 'relative' }}>
-                                <img src={preview} style={{ maxHeight: '400px', maxWidth: '100%', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} alt="Preview" />
-                                <div style={{ marginTop: '15px', color: 'var(--text-light)' }}>Nhấn để chọn ảnh khác</div>
+                            <div style={{ position: 'relative', width: '100%', height: '100%', padding: '20px' }}>
+                                <img src={preview} style={{ maxHeight: '300px', maxWidth: '100%', objectFit: 'contain', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} alt="Preview" />
+                                <div style={{ marginTop: '15px', color: 'var(--text-light)', fontWeight: 'bold' }}>Nhấn để chọn ảnh khác</div>
                             </div>
                         ) : (
-                            <div>
-                                <div className="upload-icon-circle">
+                            <div style={{ padding: '40px' }}>
+                                <div className="upload-icon-circle" style={{ background: '#fff4e6', color: 'var(--accent)' }}>
                                     <Camera size={40} />
                                 </div>
-                                <h3 style={{ margin: '0 0 10px', color: '#333' }}>Tải ảnh lên hoặc kéo thả vào đây</h3>
-                                <p style={{ color: '#888', margin: 0 }}>Hỗ trợ JPG, PNG. Tối đa 5MB.</p>
+                                <h3 style={{ margin: '15px 0 10px', color: '#333' }}>Tải ảnh món quà bạn muốn tìm</h3>
+                                <p style={{ color: '#888', margin: 0 }}>AI sẽ nhận diện và tìm cửa hàng có bán sản phẩm đó.</p>
                             </div>
                         )}
                     </div>
 
-                    <input id="img-up" type="file" hidden accept="image/*" onChange={e => {
-                        if (e.target.files[0]) {
-                            setFile(e.target.files[0]);
-                            setPreview(URL.createObjectURL(e.target.files[0]));
-                            setResult(null);
-                        }
-                    }} />
+                    <input id="img-up" type="file" hidden accept="image/*" onChange={handleFileChange} />
 
                     {file && (
                         <button
                             className="btn-booking-primary"
-                            style={{ marginTop: '25px', width: '100%', padding: '16px', fontSize: '18px' }}
+                            style={{ marginTop: '25px', width: '100%', padding: '16px', fontSize: '18px', boxShadow: '0 8px 20px rgba(212, 163, 115, 0.4)' }}
                             onClick={handleAnalyze}
                             disabled={loading}
                         >
-                            {loading ? 'Đang phân tích...' : '🔍 Tìm kiếm sản phẩm này'}
+                            {loading ? (
+                                <span><span className="loader"></span> Đang phân tích...</span>
+                            ) : (
+                                <span>Tìm kiếm ngay</span>
+                            )}
                         </button>
                     )}
                 </div>
+            )}
 
-                <div className="dcl-sidebar">
-                    {result ? (
-                        <div className="price-box-sticky">
-                            <h4 style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                <CheckCircle color="green" size={20} /> Kết quả phân tích
+            {/* --- TRẠNG THÁI 2: ĐÃ CÓ KẾT QUẢ (Hiển thị Layout kết quả) --- */}
+            {result && (
+                <div className="fade-in">
+                    {/* KHUNG KẾT QUẢ NHẬN DIỆN (HEADER CỦA RESULT) */}
+                    <div style={{ background: 'white', borderRadius: '12px', padding: '25px', boxShadow: 'var(--shadow-md)', border: '1px solid #eee', marginBottom: '30px', display: 'flex', gap: '30px', alignItems: 'center', flexWrap: 'wrap' }}>
+
+                        {/* Ảnh gốc user up lên */}
+                        <div style={{ width: '120px', height: '120px', borderRadius: '8px', overflow: 'hidden', border: '1px solid #ddd', flexShrink: 0 }}>
+                            <img src={result.image_url || preview} alt="Uploaded" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        </div>
+
+                        {/* Thông tin nhận diện */}
+                        <div style={{ flex: 1 }}>
+                            <h4 style={{ margin: '0 0 10px', color: '#666', textTransform: 'uppercase', fontSize: '13px', letterSpacing: '1px' }}>
+                                <CheckCircle size={14} style={{ marginRight: '5px', verticalAlign: '-2px' }} />
+                                Kết quả phân tích
                             </h4>
-                            <div style={{ marginBottom: '20px', padding: '10px', background: '#f9f9f9', borderRadius: '8px' }}>
-                                <small style={{ color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Từ khóa nhận diện:</small>
-                                <div style={{ fontSize: '16px', fontWeight: '600', color: 'var(--primary)' }}>
-                                    {result.identified_items?.join(', ') || "Không rõ"}
-                                </div>
+                            <div style={{ fontSize: '24px', fontWeight: 'bold', color: 'var(--primary)', fontFamily: 'Roboto Slab' }}>
+                                {result.identified_items?.join(', ') || "Không xác định được vật thể"}
                             </div>
+                            <p style={{ margin: '5px 0 0', color: '#888', fontSize: '14px' }}>
+                                Dưới đây là các cửa hàng có bán sản phẩm tương tự.
+                            </p>
+                        </div>
 
-                            <h5 style={{ margin: '0 0 10px' }}>Cửa hàng gợi ý:</h5>
-                            {result.shops?.length > 0 ? result.shops.map(s => (
-                                <div key={s.id} style={{ padding: '15px', border: '1px solid #eee', borderRadius: '8px', marginBottom: '10px', background: 'white', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <div>
-                                        <strong style={{ fontSize: '15px', display: 'block', color: '#333' }}>{s.name}</strong>
-                                        <div style={{ color: 'var(--accent)', fontWeight: 'bold', marginTop: '4px' }}>{formatCurrency(s.price)}</div>
-                                    </div>
-                                    <ChevronRight size={16} color="#ccc" />
-                                </div>
-                            )) : <p>Không tìm thấy shop nào phù hợp.</p>}
-                        </div>
-                    ) : (
-                        <div className="promo-banner" style={{ background: '#eef3f7', padding: '30px 20px', textAlign: 'center', color: '#555' }}>
-                            <Search size={40} style={{ opacity: 0.2, marginBottom: '10px' }} />
-                            <p>Kết quả tìm kiếm sẽ hiển thị tại đây sau khi bạn tải ảnh lên.</p>
-                        </div>
-                    )}
+                        {/* Nút tìm ảnh khác */}
+                        <button className="btn-secondary" onClick={handleReset} style={{ height: 'fit-content' }}>
+                            <Camera size={16} style={{ marginRight: '5px' }} /> Tìm ảnh khác
+                        </button>
+                    </div>
+
+                    {/* DANH SÁCH CỬA HÀNG GỢI Ý (GRID GIỐNG HOME) */}
+                    <div>
+                        <h3 style={{ fontFamily: 'Roboto Slab', fontSize: '20px', marginBottom: '20px', color: 'var(--primary)', borderLeft: '4px solid var(--accent)', paddingLeft: '15px' }}>
+                            Cửa hàng phù hợp nhất ({result.shops?.length || 0})
+                        </h3>
+
+                        {result.shops?.length > 0 ? (
+                            <div>
+                                {result.shops.map(shop => (
+                                    <ShopCard
+                                        key={shop.id}
+                                        shop={{ ...shop, matched_items: result.identified_items?.join(', ') }} // Truyền thêm thông tin match
+                                        onClick={() => onOpenShop(shop.id)} // Hàm mở chi tiết shop
+                                    />
+                                ))}
+                            </div>
+                        ) : (
+                            <div style={{ textAlign: 'center', padding: '50px', background: '#f9f9f9', borderRadius: '12px' }}>
+                                <ShoppingBag size={48} style={{ opacity: 0.2, marginBottom: '15px' }} />
+                                <p style={{ fontSize: '16px', color: '#666' }}>Rất tiếc, chưa tìm thấy cửa hàng nào trong hệ thống có bán sản phẩm này.</p>
+                                <button className="btn-secondary" onClick={() => window.location.reload()}>Thử lại với ảnh rõ hơn</button>
+                            </div>
+                        )}
+                    </div>
                 </div>
-            </div>
+            )}
         </div>
-    )
+    );
 }
 
 // --- SUB-COMPONENT: AUTH FORM (Cập nhật Register đầy đủ) ---
@@ -1290,7 +2712,17 @@ function AuthForm({ type, onSwitch, onLogin, onRegister, onClose }) {
                 <button className="btn-auth-full" onClick={submit}>
                     {type === 'login' ? 'Đăng nhập' : 'Đăng ký ngay'}
                 </button>
-
+                {/* THÊM ĐOẠN NÀY VÀO DƯỚI NÚT ĐĂNG NHẬP */}
+                {type === 'login' && (
+                    <div style={{ textAlign: 'center', marginTop: '15px' }}>
+                        <span
+                            style={{ color: '#666', fontSize: '13px', cursor: 'pointer' }}
+                            onClick={() => { onClose(); onSwitch('forgot-password'); }} // Cần truyền prop onSwitch đặc biệt hoặc xử lý ở cha
+                        >
+                            Quên mật khẩu?
+                        </span>
+                    </div>
+                )}
                 <div style={{ textAlign: 'center', marginTop: '20px', fontSize: '14px', color: '#666' }}>
                     {type === 'login' ? 'Chưa có tài khoản? ' : 'Đã có tài khoản? '}
                     <span style={{ color: 'var(--primary)', fontWeight: 'bold', cursor: 'pointer', textDecoration: 'underline' }} onClick={onSwitch}>
@@ -1316,7 +2748,7 @@ function CommentForm({ shopId, onSuccess }) {
             for (let i = 0; i < images.length; i++) fd.append('images', images[i]);
         }
 
-        await fetch(`${API_BASE}/api/shops/${shopId}/comments`, { method: 'POST', body: fd });
+        await fetch(`${API_BASE}/api/shops/${shopId}/comments`, { method: 'POST', body: fd, credentials: 'include' });
         setContent(''); setImages([]); onSuccess();
     };
 
