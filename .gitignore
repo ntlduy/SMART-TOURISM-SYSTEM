@@ -3,8 +3,10 @@ backend/venv/
 backend/__pycache__/
 backend/*.pyc
 backend/.envs
+backend/.env
 backend/instance/
 backend/seed_tiktok.py
+backend/import_tiktok.py
 
 # --- PHẦN CHO REACT (FRONTEND) ---
 frontend/node_modules/

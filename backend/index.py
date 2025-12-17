@@ -194,22 +194,82 @@ def api_update_avatar():
     except Exception as ex:
         return jsonify({'error': str(ex)}), 500
 
+# @app.route('/api/chat', methods=['POST'])
+# def api_chat():
+#     try:
+#         data = request.get_json()
+#         user_message = data.get('message', '')
+#         chat_history = data.get('history', []) 
+        
+#         if not user_message:
+#             return jsonify({'reply': 'Vui lòng gửi tin nhắn.', 'success': False}), 400
+
+#         # Gọi hàm AI (lúc này trả về dict)
+#         ai_result = utils.get_gemini_response(user_message, chat_history=chat_history)
+        
+#         # ai_result sẽ có dạng: { "answer": "...", "shop_ids": [1, 2] }
+        
+#         # (Tùy chọn) Đại Vương có thể query lại DB để lấy thông tin chi tiết các shop này trả về luôn cho FE đẹp hơn
+#         suggested_shops = []
+#         if ai_result.get('shop_ids'):
+#             for sid in ai_result['shop_ids']:
+#                 s = utils.get_shop_by_id(sid)
+#                 if s:
+#                     suggested_shops.append(s.to_dict())
+
+#         return jsonify({
+#             'reply': ai_result.get('answer'), # Lời thoại của AI
+#             'shop_ids': ai_result.get('shop_ids'), # Danh sách ID đơn thuần
+#             'shops': suggested_shops, # (Option) Danh sách object shop đầy đủ để FE render card
+#             'success': True
+#         })
+
+#     except Exception as e:
+#         print(f"Chat Error: {e}")
+#         return jsonify({'reply': 'Lỗi server', 'success': False}), 500
+    
+
+
+from models import ChatHistory 
+
+# 1. CẬP NHẬT API CHAT
 @app.route('/api/chat', methods=['POST'])
+@login_required # Bắt buộc đăng nhập để lưu history
 def api_chat():
     try:
         data = request.get_json()
         user_message = data.get('message', '')
-        chat_history = data.get('history', []) 
         
         if not user_message:
             return jsonify({'reply': 'Vui lòng gửi tin nhắn.', 'success': False}), 400
 
-        # Gọi hàm AI (lúc này trả về dict)
-        ai_result = utils.get_gemini_response(user_message, chat_history=chat_history)
+        # A. Lưu tin nhắn của User vào DB
+        utils.save_chat_message(current_user.id, 'user', user_message)
+
+        # B. Lấy lịch sử từ DB để AI hiểu ngữ cảnh (Lấy 10 tin gần nhất gửi cho Gemini)
+        # Format history theo đúng chuẩn Gemini yêu cầu
+        db_history = ChatHistory.query.filter_by(user_id=current_user.id)\
+                                      .order_by(ChatHistory.created_date.desc())\
+                                      .limit(10).all()
+        # Đảo ngược lại để đúng thứ tự thời gian (Cũ -> Mới)
+        db_history.reverse()
         
-        # ai_result sẽ có dạng: { "answer": "...", "shop_ids": [1, 2] }
+        formatted_history = []
+        for h in db_history:
+            formatted_history.append({
+                "role": h.role,
+                "parts": [h.message]
+            })
+
+        # C. Gọi AI xử lý
+        ai_result = utils.get_gemini_response(user_message, chat_history=formatted_history)
         
-        # (Tùy chọn) Đại Vương có thể query lại DB để lấy thông tin chi tiết các shop này trả về luôn cho FE đẹp hơn
+        ai_reply_text = ai_result.get('answer', 'Lỗi hệ thống')
+
+        # D. Lưu câu trả lời của AI vào DB
+        utils.save_chat_message(current_user.id, 'model', ai_reply_text)
+        
+        # E. Xử lý gợi ý shop (như cũ)
         suggested_shops = []
         if ai_result.get('shop_ids'):
             for sid in ai_result['shop_ids']:
@@ -218,15 +278,44 @@ def api_chat():
                     suggested_shops.append(s.to_dict())
 
         return jsonify({
-            'reply': ai_result.get('answer'), # Lời thoại của AI
-            'shop_ids': ai_result.get('shop_ids'), # Danh sách ID đơn thuần
-            'shops': suggested_shops, # (Option) Danh sách object shop đầy đủ để FE render card
+            'reply': ai_reply_text,
+            'shop_ids': ai_result.get('shop_ids'),
+            'shops': suggested_shops,
             'success': True
         })
 
     except Exception as e:
         print(f"Chat Error: {e}")
         return jsonify({'reply': 'Lỗi server', 'success': False}), 500
+
+
+# 2. API LẤY LỊCH SỬ CHAT (Khi mới load trang)
+@app.route('/api/chat/history', methods=['GET'])
+@login_required
+def api_get_chat_history():
+    history = utils.get_user_chat_history(current_user.id)
+    return jsonify({
+        'success': True,
+        'data': [h.to_dict() for h in history]
+    })
+
+
+# 3. API XÓA 1 TIN NHẮN
+@app.route('/api/chat/message/<int:msg_id>', methods=['DELETE'])
+@login_required
+def api_delete_chat_message(msg_id):
+    if utils.delete_chat_message(msg_id, current_user.id):
+        return jsonify({'success': True, 'message': 'Đã xóa tin nhắn'})
+    return jsonify({'success': False, 'error': 'Không tìm thấy tin nhắn'}), 404
+
+
+# 4. API XÓA TẤT CẢ LỊCH SỬ
+@app.route('/api/chat/history', methods=['DELETE'])
+@login_required
+def api_clear_chat_history():
+    if utils.clear_all_chat_history(current_user.id):
+        return jsonify({'success': True, 'message': 'Đã xóa toàn bộ lịch sử'})
+    return jsonify({'success': False, 'error': 'Lỗi hệ thống'}), 500
 
 
 @app.route('/api/search-by-image', methods=['POST'])

@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Souvenir AI Assistant</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --primary-color: #0084ff;
+            --bg-color: #f0f2f5;
+            --user-msg-bg: #0084ff;
+            --user-msg-text: #ffffff;
+            --bot-msg-bg: #e4e6eb;
+            --bot-msg-text: #050505;
+            --danger: #ff4d4f;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg-color);
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        /* --- LOGIN SCREEN --- */
+        #login-screen {
+            background: white;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+            width: 100%;
+            max-width: 320px;
+            text-align: center;
+        }
+        
+        .form-input {
+            width: 100%;
+            padding: 12px;
+            margin: 8px 0;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            box-sizing: border-box;
+            outline: none;
+        }
+        .btn-primary {
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 12px;
+            border-radius: 8px;
+            width: 100%;
+            cursor: pointer;
+            font-weight: 600;
+            margin-top: 10px;
+        }
+
+        /* --- CHAT SCREEN --- */
+        #chat-screen {
+            width: 400px;
+            height: 650px;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 5px 30px rgba(0,0,0,0.15);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* Header */
+        .chat-header {
+            background: white;
+            padding: 15px 20px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .header-info { display: flex; align-items: center; gap: 10px; }
+        .avatar { width: 40px; height: 40px; border-radius: 50%; background: #ddd; object-fit: cover; }
+        
+        /* Messages Area */
+        #messages-container {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            background: white;
+        }
+
+        /* Message Bubbles */
+        .message-row { display: flex; align-items: flex-end; gap: 8px; position: relative; }
+        .message-row.user { justify-content: flex-end; }
+        
+        .msg-bubble {
+            max-width: 70%;
+            padding: 10px 15px;
+            border-radius: 18px;
+            font-size: 14px;
+            line-height: 1.4;
+            word-wrap: break-word;
+        }
+        
+        .message-row.user .msg-bubble {
+            background: var(--user-msg-bg);
+            color: var(--user-msg-text);
+            border-bottom-right-radius: 4px;
+        }
+        
+        .message-row.model .msg-bubble {
+            background: var(--bot-msg-bg);
+            color: var(--bot-msg-text);
+            border-bottom-left-radius: 4px;
+        }
+
+        /* Delete Button */
+        .delete-btn {
+            opacity: 0;
+            font-size: 12px;
+            color: #ccc;
+            cursor: pointer;
+            padding: 5px;
+        }
+        .message-row:hover .delete-btn { opacity: 1; }
+        .message-row.user .delete-btn { order: -1; margin-right: 5px; }
+        .message-row.model .delete-btn { order: 2; margin-left: 5px; }
+        .delete-btn:hover { color: var(--danger); }
+
+        /* Typing Indicator */
+        .typing-indicator {
+            display: none; /* Mặc định ẩn */
+            padding: 10px 15px;
+            background: var(--bot-msg-bg);
+            border-radius: 18px;
+            border-bottom-left-radius: 4px;
+            width: fit-content;
+            margin-bottom: 10px;
+        }
+        .dot {
+            width: 6px; height: 6px; background: #90949c; border-radius: 50%; display: inline-block;
+            animation: bounce 1.4s infinite ease-in-out both;
+        }
+        .dot:nth-child(1) { animation-delay: -0.32s; }
+        .dot:nth-child(2) { animation-delay: -0.16s; }
+        @keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
+
+        /* Shop Cards */
+        .shop-container { display: flex; gap: 10px; overflow-x: auto; padding: 5px 0; width: 100%; }
+        .shop-card { min-width: 180px; border: 1px solid #eee; border-radius: 10px; padding: 10px; font-size: 12px; }
+
+        /* Input Area */
+        .input-area {
+            padding: 15px;
+            border-top: 1px solid #eee;
+            display: flex;
+            gap: 10px;
+        }
+        #chat-input { flex: 1; padding: 10px; border-radius: 20px; border: 1px solid #ddd; outline: none; }
+        .send-btn { border: none; background: none; color: var(--primary-color); font-size: 20px; cursor: pointer; }
+        
+        .hidden { display: none !important; }
+
+    </style>
+</head>
+<body>
+
+    <div id="login-screen">
+        <h2 style="color: var(--primary-color);">Đăng Nhập</h2>
+        <input type="text" id="username" class="form-input" placeholder="Username">
+        <input type="password" id="password" class="form-input" placeholder="Password">
+        <p id="login-error" style="color: red; display: none;"></p>
+        <button class="btn-primary" onclick="handleLogin()">Vào Chat</button>
+    </div>
+
+    <div id="chat-screen" class="hidden">
+        <div class="chat-header">
+            <div class="header-info">
+                <img src="https://cdn-icons-png.flaticon.com/512/4712/4712035.png" alt="Bot" class="avatar">
+                <div><b>Souvenir AI</b><br><small style="color: #65676b">Đang hoạt động</small></div>
+            </div>
+            <div>
+                <button onclick="clearHistory()" style="border:none; background:none; cursor:pointer"><i class="fas fa-trash"></i></button>
+                <button onclick="logout()" style="border:none; background:none; cursor:pointer"><i class="fas fa-sign-out-alt"></i></button>
+            </div>
+        </div>
+
+        <div id="messages-container">
+            <div id="typing-indicator" class="typing-indicator">
+                <span class="dot"></span> <span class="dot"></span> <span class="dot"></span>
+            </div>
+        </div>
+
+        <div class="input-area">
+            <input type="text" id="chat-input" placeholder="Nhập tin nhắn..." onkeypress="if(event.key==='Enter') sendMessage()">
+            <button class="send-btn" onclick="sendMessage()"><i class="fas fa-paper-plane"></i></button>
+        </div>
+    </div>
+
+    <script>
+        const BASE_URL = 'http://127.0.0.1:5000';
+
+        async function fetchAPI(endpoint, method = 'GET', body = null) {
+            try {
+                const options = {
+                    method: method,
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include' 
+                };
+                if (body) options.body = JSON.stringify(body);
+                const res = await fetch(`${BASE_URL}${endpoint}`, options);
+                return await res.json();
+            } catch (err) {
+                console.error(err);
+                return null;
+            }
+        }
+
+        window.onload = async () => {
+            const res = await fetchAPI('/api/current-user');
+            if (res && res.is_authenticated) switchToChat();
+        };
+
+        function switchToChat() {
+            document.getElementById('login-screen').classList.add('hidden');
+            document.getElementById('chat-screen').classList.remove('hidden');
+            loadHistory();
+        }
+
+        async function handleLogin() {
+            const u = document.getElementById('username').value;
+            const p = document.getElementById('password').value;
+            const res = await fetchAPI('/api/login', 'POST', { username: u, password: p });
+            if (res && res.success) switchToChat();
+            else {
+                document.getElementById('login-error').innerText = res.error || "Lỗi đăng nhập";
+                document.getElementById('login-error').style.display = 'block';
+            }
+        }
+
+        async function logout() {
+            await fetchAPI('/api/logout', 'POST');
+            location.reload();
+        }
+
+        // --- SỬA LỖI LOGIC TẢI LỊCH SỬ ---
+        async function loadHistory() {
+            const container = document.getElementById('messages-container');
+            
+            // 1. Reset container nhưng phải TẠO LẠI Typing Indicator ngay lập tức
+            // Vì innerHTML = '' sẽ xóa mất cái div typing cũ
+            container.innerHTML = `
+                <div id="typing-indicator" class="typing-indicator">
+                    <span class="dot"></span> <span class="dot"></span> <span class="dot"></span>
+                </div>
+            `;
+
+            console.log("Đang tải lịch sử...");
+            const res = await fetchAPI('/api/chat/history');
+            
+            if (res && res.success) {
+                console.log("Tìm thấy " + res.data.length + " tin nhắn.");
+                res.data.forEach(msg => {
+                    renderMessage(msg.role, msg.message, msg.id);
+                });
+                scrollToBottom();
+            }
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('chat-input');
+            const text = input.value.trim();
+            if (!text) return;
+
+            renderMessage('user', text, null);
+            input.value = '';
+            scrollToBottom();
+            showTyping(true);
+
+            const res = await fetchAPI('/api/chat', 'POST', { message: text });
+            showTyping(false);
+
+            if (res && res.success) {
+                renderMessage('model', res.reply, null);
+                if (res.shops && res.shops.length > 0) renderShopCards(res.shops);
+                scrollToBottom();
+            }
+        }
+
+        // --- SỬA LỖI RENDER ---
+        function renderMessage(role, text, id) {
+            const container = document.getElementById('messages-container');
+            const typing = document.getElementById('typing-indicator');
+
+            const row = document.createElement('div');
+            row.className = `message-row ${role}`;
+            
+            const html = `<div class="msg-bubble">${text.replace(/\n/g, '<br>')}</div>`;
+            row.innerHTML = html;
+
+            if (id) {
+                const btn = document.createElement('i');
+                btn.className = "fas fa-trash delete-btn";
+                btn.onclick = () => deleteMsg(id, row);
+                row.appendChild(btn);
+            }
+
+            // SỬA LỖI: Kiểm tra kỹ trước khi insert
+            if (typing && typing.parentNode === container) {
+                container.insertBefore(row, typing);
+            } else {
+                // Nếu lỡ mất typing indicator thì append xuống cuối luôn
+                container.appendChild(row);
+            }
+        }
+
+        function renderShopCards(shops) {
+            const container = document.getElementById('messages-container');
+            const typing = document.getElementById('typing-indicator');
+            
+            const row = document.createElement('div');
+            row.className = 'message-row model';
+            let cards = shops.map(s => `
+                <div class="shop-card">
+                    <h4 style="margin:0 0 5px; color:#0084ff">${s.name}</h4>
+                    <p>📍 ${s.address}</p>
+                    <p>💰 ${s.price}</p>
+                </div>
+            `).join('');
+            
+            row.innerHTML = `<div class="shop-container">${cards}</div>`;
+            
+            if (typing && typing.parentNode === container) container.insertBefore(row, typing);
+            else container.appendChild(row);
+        }
+
+        function showTyping(show) {
+            const el = document.getElementById('typing-indicator');
+            if(el) {
+                el.style.display = show ? 'block' : 'none';
+                if(show) scrollToBottom();
+            }
+        }
+
+        function scrollToBottom() {
+            const c = document.getElementById('messages-container');
+            c.scrollTop = c.scrollHeight;
+        }
+
+        async function deleteMsg(id, el) {
+            if(!confirm("Xóa tin nhắn này?")) return;
+            el.style.opacity = 0;
+            await fetchAPI(`/api/chat/message/${id}`, 'DELETE');
+            setTimeout(() => el.remove(), 300);
+        }
+
+        async function clearHistory() {
+            if(!confirm("Xóa toàn bộ lịch sử?")) return;
+            await fetchAPI('/api/chat/history', 'DELETE');
+            // Reset lại UI và tạo lại typing indicator
+            document.getElementById('messages-container').innerHTML = `
+                <div id="typing-indicator" class="typing-indicator">
+                    <span class="dot"></span> <span class="dot"></span> <span class="dot"></span>
+                </div>
+            `;
+        }
+    </script>
+</body>
+</html>

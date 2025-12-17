@@ -1,6 +1,6 @@
 import hashlib
 from __init__ import app, db, mail
-from models import User, Shop, Comment, City, Category
+from models import User, Shop, Comment, City, Category, ChatHistory
 import random
 from datetime import datetime, timedelta
 from flask_mail import Message
@@ -127,7 +127,7 @@ def get_gemini_response(user_message, chat_history=[]):
             
             # Chỉ tìm nếu có keyword, nếu user chỉ nói "Hello" thì không cần query DB
             if kw or city:
-                shops_db = search_shops_from_db(keywords=kw, city=city, limit=8) # Lấy top 8
+                shops_db = search_shops_from_db(keywords=kw, city=city, limit=4) # Lấy top 8
                 
                 if shops_db:
                     context_text = "DƯỚI ĐÂY LÀ KẾT QUẢ TÌM KIẾM TỪ DATABASE:\n"
@@ -487,3 +487,58 @@ def search_shops_from_db(keywords=None, city=None, limit=5):
     shops = query.limit(limit).all()
     
     return shops
+
+
+# --- CÁC HÀM QUẢN LÝ CHAT HISTORY ---
+
+def save_chat_message(user_id, role, message):
+    """
+    Lưu tin nhắn và đảm bảo giới hạn số lượng (Ví dụ: 50 tin gần nhất).
+    """
+    MAX_HISTORY = 50  # Giới hạn số tin nhắn lưu trữ cho mỗi user
+    
+    # 1. Lưu tin nhắn mới
+    new_msg = ChatHistory(user_id=user_id, role=role, message=message)
+    db.session.add(new_msg)
+    
+    # 2. Kiểm tra số lượng
+    count = ChatHistory.query.filter_by(user_id=user_id).count()
+    
+    if count > MAX_HISTORY:
+        # Tìm các tin nhắn cũ nhất để xóa bớt
+        # Lấy danh sách ID cần xóa (số lượng vượt quá)
+        limit = count - MAX_HISTORY
+        old_msgs = ChatHistory.query.filter_by(user_id=user_id)\
+            .order_by(ChatHistory.created_date.asc())\
+            .limit(limit).all()
+            
+        for msg in old_msgs:
+            db.session.delete(msg)
+            
+    db.session.commit()
+    return new_msg
+
+def get_user_chat_history(user_id):
+    """Lấy toàn bộ lịch sử chat của user (để hiển thị lên giao diện)"""
+    return ChatHistory.query.filter_by(user_id=user_id)\
+                            .order_by(ChatHistory.created_date.asc()).all()
+
+def delete_chat_message(msg_id, user_id):
+    """Xóa 1 tin nhắn cụ thể"""
+    msg = ChatHistory.query.filter_by(id=msg_id, user_id=user_id).first()
+    if msg:
+        db.session.delete(msg)
+        db.session.commit()
+        return True
+    return False
+
+def clear_all_chat_history(user_id):
+    """Xóa toàn bộ lịch sử chat của user"""
+    try:
+        ChatHistory.query.filter_by(user_id=user_id).delete()
+        db.session.commit()
+        return True
+    except Exception as e:
+        db.session.rollback()
+        print(e)
+        return False
