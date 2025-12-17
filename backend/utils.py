@@ -288,7 +288,8 @@ def update_password(user_id, new_password):
 
 # 1. Hàm tính khoảng cách (Haversine Formula)
 def calculate_distance(lat1, lon1, lat2, lon2):
-    if not lat1 or not lon1 or not lat2 or not lon2:
+    # Only treat coordinates as missing when they are None (0 is a valid coordinate)
+    if lat1 is None or lon1 is None or lat2 is None or lon2 is None:
         return float('inf') # Trả về vô cực nếu thiếu tọa độ
     
     R = 6371  # Bán kính trái đất (km)
