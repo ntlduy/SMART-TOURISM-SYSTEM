@@ -52,54 +52,129 @@ SOUVENIR_SYSTEM_INSTRUCTION = (
     "Phản hồi của bạn phải ngắn gọn, hữu ích, và sử dụng ngôn ngữ tiếng Việt tự nhiên."
 )
 
+def apply_smart_search(query, keyword_str):
+    """
+    Hàm lõi: Tách từ khóa theo dấu phẩy và áp dụng filter OR.
+    Ví dụ: "bình gốm, vòng tay" -> Tìm (name LIKE %bình gốm% OR items LIKE %bình gốm%) 
+                                OR (name LIKE %vòng tay% OR items LIKE %vòng tay%)
+    """
+    if not keyword_str:
+        return query
 
+    # 1. Tách chuỗi bằng dấu phẩy, xóa khoảng trắng thừa
+    keywords = [k.strip() for k in keyword_str.split(',') if k.strip()]
+    
+    if not keywords:
+        return query
+
+    # 2. Tạo danh sách các điều kiện lọc
+    filters = []
+    for k in keywords:
+        # Tìm trong Tên Shop HOẶC trong Mặt hàng (items)
+        filters.append(Shop.shop_name.contains(k))
+        filters.append(Shop.items.contains(k))
+    
+    # 3. Gộp tất cả điều kiện bằng phép OR
+    # Nghĩa là chỉ cần thỏa mãn 1 trong các từ khóa là lấy
+    return query.filter(or_(*filters))
 
 
 # --- Hàm xử lý logic AI bằng Gemini (Sử dụng cấu trúc mới) ---
+import json
+import re
+
 def get_gemini_response(user_message, chat_history=[]):
-    """
-    Sử dụng Gemini API để nhận phản hồi thông minh và duy trì lịch sử trò chuyện 
-    theo cấu trúc start_chat.
-    :param user_message: Câu hỏi mới nhất của người dùng.
-    :param chat_history: List lịch sử chat (format cũ) từ frontend.
-    """
     global client
     if not client:
-        return "Lỗi cấu hình AI. Vui lòng kiểm tra lại GEMINI_API_KEY trên server."
+        return {"answer": "Lỗi AI.", "shop_ids": []}
 
     try:
-        # 1. Khởi tạo model và system instruction
-        model = genai.GenerativeModel(
-            'gemini-2.5-flash',
-            system_instruction=SOUVENIR_SYSTEM_INSTRUCTION
-        )
-
-        # 2. Định dạng lại lịch sử chat để tương thích với genai.GenerativeModel.start_chat
-        formatted_history = []
-        for msg in chat_history:
-             # Kiểm tra và chuyển đổi định dạng
-            if msg.get('role') in ['user', 'model'] and msg.get('parts'):
-                # API mới chỉ cần chuỗi văn bản cho mỗi part
-                text_part = msg['parts'][0].get('text') if isinstance(msg['parts'][0], dict) else msg['parts'][0]
-                if text_part:
-                    formatted_history.append({
-                        "role": msg['role'],
-                        "parts": [text_part] # Truyền thẳng chuỗi văn bản
-                    })
-
-        # 3. Tạo phiên chat với lịch sử cũ
-        chat_session = model.start_chat(history=formatted_history)
-
-        # 4. Gửi tin nhắn mới nhất
-        response = chat_session.send_message(user_message)
+        # --- GIAI ĐOẠN 1: DÙNG AI ĐỂ HIỂU Ý ĐỊNH KHÁCH HÀNG ---
+        # Mục tiêu: Biến "tui muốn mua bánh tráng ở sài gòn" -> {"keyword": "bánh tráng", "city": "Hồ Chí Minh"}
         
-        return response.text
+        intent_prompt = f"""
+        Bạn là một bộ lọc thông minh. Nhiệm vụ của bạn là trích xuất từ khóa tìm kiếm từ câu nói của người dùng.
         
+        Câu người dùng: "{user_message}"
+        
+        Yêu cầu Output: Trả về JSON duy nhất:
+        {{
+            "keyword": "tên món ăn hoặc tên quán(ví dụ: vòng tay, tranh)",
+            "city": "tên thành phố nếu có (ngắn gọn, ví dụ: Hồ Chí Minh, Hà Nội...)",
+            "is_searching": true/false (true nếu người dùng đang muốn tìm mua gì đó, false nếu chỉ chào hỏi xã giao)
+        }}
+        """
+        
+        model_flash = genai.GenerativeModel('gemini-2.5-flash') # Dùng bản Flash cho nhanh và rẻ
+        intent_resp = model_flash.generate_content(intent_prompt)
+        
+        try:
+            # Làm sạch chuỗi json
+            clean_intent = intent_resp.text.replace("```json", "").replace("```", "").strip()
+            intent_data = json.loads(clean_intent)
+        except:
+            # Nếu lỗi parse, mặc định là tìm theo toàn bộ tin nhắn
+            intent_data = {"keyword": user_message, "city": None, "is_searching": True}
+
+        # --- GIAI ĐOẠN 2: TRUY VẤN DATABASE (RAG) ---
+        found_shops = []
+        context_text = ""
+        
+        if intent_data.get("is_searching"):
+            # Gọi hàm SQL đã viết ở bước 1
+            kw = intent_data.get("keyword")
+            city = intent_data.get("city")
+            
+            # Chỉ tìm nếu có keyword, nếu user chỉ nói "Hello" thì không cần query DB
+            if kw or city:
+                shops_db = search_shops_from_db(keywords=kw, city=city, limit=8) # Lấy top 8
+                
+                if shops_db:
+                    context_text = "DƯỚI ĐÂY LÀ KẾT QUẢ TÌM KIẾM TỪ DATABASE:\n"
+                    for s in shops_db:
+                        # Format dữ liệu để đưa vào Prompt bước 3
+                        items_str = s.items if s.items else "Nhiều món"
+                        city_name = s.city_obj.name if s.city_obj else ""
+                        line = (f"- ID: {s.id} | Tên: {s.shop_name} | Đ/C: {s.address}, {city_name} "
+                                f"| Món: {items_str} | Giá: {s.price}\n")
+                        context_text += line
+                        found_shops.append(s.id) # Lưu lại ID để trả về Frontend
+                else:
+                    context_text = "Hệ thống đã tìm trong Database nhưng không thấy quán nào phù hợp với từ khóa trên."
+        
+        # --- GIAI ĐOẠN 3: AI TRẢ LỜI CUỐI CÙNG ---
+        
+        FINAL_PROMPT = f"""
+        {SOUVENIR_SYSTEM_INSTRUCTION}
+        
+        THÔNG TIN TÌM ĐƯỢC TỪ HỆ THỐNG:
+        {context_text}
+        
+        LỊCH SỬ CHAT:
+        {chat_history}
+        
+        CÂU HỎI CỦA KHÁCH: "{user_message}"
+        
+        YÊU CẦU:
+        1. Dựa vào thông tin tìm được ở trên để trả lời khách.
+        2. Nếu có danh sách quán, hãy giới thiệu sơ qua.
+        3. Nếu không tìm thấy quán (context trống hoặc báo không có), hãy xin lỗi khéo léo và gợi ý tìm từ khóa khác.
+        5. Trả về định dạng JSON: {{ "answer": "...", "shop_ids": {found_shops} }}
+        """
+        
+        # Gửi request cuối
+        final_resp = model_flash.generate_content(FINAL_PROMPT)
+        
+        # Parse kết quả cuối cùng
+        final_clean = final_resp.text.replace("```json", "").replace("```", "").strip()
+        try:
+            return json.loads(final_clean)
+        except:
+             return {"answer": final_clean, "shop_ids": found_shops}
+
     except Exception as e:
-        # In lỗi cụ thể để debug
-        print(f"LỖI GỌI API TRONG get_gemini_response: {str(e)}")
-        # Trả về thông báo lỗi thân thiện cho frontend
-        return "Xin lỗi, hiện tại tôi đang gặp vấn đề kết nối với AI. Vui lòng thử lại sau."
+        print(f"LỖI RAG: {e}")
+        return {"answer": "server đang quá tải xíu ạ.", "shop_ids": []}
 
 
 def add_user(name, username, password, **kwargs):
@@ -123,23 +198,6 @@ def get_user_by_id(user_id):
     return User.query.get(user_id)
 
 
-
-def load_shops(kw=None, from_price=None, to_price=None, page=1):
-    shops = Shop.query
-    
-    if kw:
-        from sqlalchemy import or_
-        shops = shops.filter(or_(
-            Shop.shop_name.contains(kw),
-            Shop.items.contains(kw)
-        ))
-    
-
-    page_size = app.config['PAGE_SIZE']
-    start = (page - 1) * page_size
-    end = start + page_size
-    
-    return shops.slice(start, end).all()
 
 def count_shops():
     return Shop.query.count()
@@ -230,7 +288,8 @@ def update_password(user_id, new_password):
 
 # 1. Hàm tính khoảng cách (Haversine Formula)
 def calculate_distance(lat1, lon1, lat2, lon2):
-    if not lat1 or not lon1 or not lat2 or not lon2:
+    # Only treat coordinates as missing when they are None (0 is a valid coordinate)
+    if lat1 is None or lon1 is None or lat2 is None or lon2 is None:
         return float('inf') # Trả về vô cực nếu thiếu tọa độ
     
     R = 6371  # Bán kính trái đất (km)
@@ -247,26 +306,22 @@ def calculate_distance(lat1, lon1, lat2, lon2):
 from models import Shop, City, Category  # <--- Thêm Category vào đây
 
 def load_shops(kw=None, from_price=None, to_price=None, 
-               city=None, category=None,  # <--- Thêm tham số category
+               city=None, category=None, 
                min_rating=None, 
                user_lat=None, user_lon=None, radius=None, page=1):
     
     query = Shop.query
     
-    # --- 1. Lọc theo Keyword (Tên shop hoặc Vật phẩm) ---
+    # --- 1. TÌM KIẾM THÔNG MINH (Thay thế đoạn code cũ) ---
     if kw:
-        query = query.filter(or_(
-            Shop.shop_name.contains(kw),
-            Shop.items.contains(kw)
-        ))
+        query = apply_smart_search(query, kw)
     
     # --- 2. Lọc theo Tỉnh/Thành phố ---
     if city and city != 'all':
         query = query.join(City).filter(City.name == city)
 
-    # --- 3. Lọc theo Category  ---
+    # --- 3. Lọc theo Category ---
     if category and category != 'all':
-        # Join bảng Category và lọc theo tên
         query = query.join(Category).filter(Category.name == category)
         
     # --- 4. Lọc theo Giá ---
@@ -279,10 +334,10 @@ def load_shops(kw=None, from_price=None, to_price=None,
     if min_rating:
         query = query.filter(Shop.rating >= float(min_rating))
 
-    # Lấy toàn bộ dữ liệu thỏa mãn các điều kiện trên
+    # Lấy dữ liệu (Execute Query)
     shops = query.all()
     
-    # --- 6. Lọc theo Khoảng cách (Logic Python) ---
+    # --- 6. Lọc theo Khoảng cách (Logic Python giữ nguyên) ---
     if user_lat and user_lon and radius:
         try:
             user_lat = float(user_lat)
@@ -291,12 +346,17 @@ def load_shops(kw=None, from_price=None, to_price=None,
             
             filtered_shops = []
             for s in shops:
-                dist = calculate_distance(user_lat, user_lon, s.lat, s.lon)
-                s.distance = round(dist, 1)
+                # Xử lý trường hợp shop không có toạ độ
+                s_lat = s.lat if s.lat is not None else 0
+                s_lon = s.lon if s.lon is not None else 0
+                
+                dist = calculate_distance(user_lat, user_lon, s_lat, s_lon)
+                s.distance = round(dist, 1) # Gán thuộc tính tạm distance để sort
                 
                 if dist <= radius:
                     filtered_shops.append(s)
             
+            # Sort theo khoảng cách gần nhất
             shops = sorted(filtered_shops, key=lambda x: x.distance)
             
         except ValueError:
@@ -383,3 +443,92 @@ def update_user_avatar(user_id, avatar_url):
     except Exception as e:
         print(e)
         return False
+    
+
+
+def get_all_shops_context():
+    """
+    Lấy toàn bộ shop từ DB và format thành chuỗi văn bản để dạy AI.
+    """
+    shops = Shop.query.all()
+    context_text = "DANH SÁCH CÁC CỬA HÀNG TRONG HỆ THỐNG:\n"
+    
+    for s in shops:
+        # Format: ID: 1 | Tên: Shop A | Địa chỉ: HCM | Bán: Bánh, Kẹo | Giá: 50000
+        items_str = s.items if s.items else "Không rõ mặt hàng"
+        city_name = s.city_obj.name if s.city_obj else "Không rõ"
+        
+        line = (f"- ID: {s.id} | Tên: {s.shop_name} | Địa chỉ: {s.address}, {city_name} "
+                f"| Mặt hàng: {items_str} | Giá khoảng: {s.price}\n")
+        context_text += line
+        
+    return context_text
+
+
+def search_shops_from_db(keywords=None, city=None, limit=5):
+    """
+    Hàm này thay thế việc load toàn bộ DB.
+    Nó chỉ lấy tối đa 'limit' shop dựa trên tiêu chí tìm kiếm.
+    """
+    query = Shop.query
+    
+    # 1. Lọc theo từ khóa (Tên hoặc món ăn)
+    if keywords:
+        query = query.filter(or_(
+            Shop.shop_name.contains(keywords),
+            Shop.items.contains(keywords)
+        ))
+        
+    # 2. Lọc theo thành phố (Nếu AI phát hiện ra tên thành phố)
+    if city:
+        # Tìm gần đúng tên thành phố
+        query = query.join(City).filter(City.name.contains(city))
+        
+    # 3. Lấy giới hạn kết quả (Quan trọng để không bị quá tải)
+    shops = query.limit(limit).all()
+    
+    return shops
+
+# --- utils.py ---
+
+def get_user_favorite_shops(user_id):
+    """Lấy danh sách shop mà user đã like"""
+    user = get_user_by_id(user_id)
+    if user:
+        # Trả về list các object Shop
+        return user.favorite_shops.all()
+    return []
+
+def toggle_shop_favorite(user_id, shop_id):
+    """
+    Kiểm tra:
+    - Nếu đã like -> Xóa (Unlike)
+    - Nếu chưa like -> Thêm (Like)
+    Trả về: trạng thái mới ('added' hoặc 'removed')
+    """
+    user = get_user_by_id(user_id)
+    shop = get_shop_by_id(shop_id)
+
+    if not user or not shop:
+        return None
+
+    # Kiểm tra xem shop đã nằm trong list yêu thích chưa
+    # Dùng cách query trực tiếp trên relationship dynamic
+    is_favorited = user.favorite_shops.filter(Shop.id == shop_id).count() > 0
+
+    if is_favorited:
+        user.favorite_shops.remove(shop)
+        action = 'removed'
+    else:
+        user.favorite_shops.append(shop)
+        action = 'added'
+
+    db.session.commit()
+    return action
+
+def check_is_favorite(user_id, shop_id):
+    """Kiểm tra nhanh 1 shop có được like bởi user này không"""
+    user = get_user_by_id(user_id)
+    if user:
+        return user.favorite_shops.filter(Shop.id == shop_id).count() > 0
+    return False    
