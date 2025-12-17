@@ -81,6 +81,7 @@ def api_shop_detail(shop_id):
     })
 
 
+
 # --- 2. API AUTH (Đăng ký, Đăng nhập, Đăng xuất) ---
 
 @app.route('/api/register', methods=['POST'])
@@ -251,6 +252,47 @@ def api_search_by_image():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+# --- index.py ---
+
+# 1. API Lấy danh sách yêu thích (Dùng cho trang Profile)
+@app.route('/api/favorites', methods=['GET'])
+@login_required
+def api_get_favorites():
+    # Lấy danh sách shop object
+    fav_shops = utils.get_user_favorite_shops(current_user.id)
+    
+    # Lấy danh sách ID để frontend dễ check trạng thái active của trái tim
+    fav_ids = [s.id for s in fav_shops]
+    
+    # Format dữ liệu giống API /api/shops để tái sử dụng Component ShopCard
+    data = [s.to_dict() for s in fav_shops]
+    
+    return jsonify({
+        'favorites': data,
+        'ids': fav_ids,
+        'success': True
+    })
+
+# 2. API Toggle Favorite (Dùng khi bấm trái tim)
+@app.route('/api/favorites/toggle', methods=['POST'])
+@login_required
+def api_toggle_favorite():
+    data = request.get_json()
+    shop_id = data.get('shop_id')
+    
+    if not shop_id:
+        return jsonify({'error': 'Thiếu shop_id'}), 400
+        
+    action = utils.toggle_shop_favorite(current_user.id, shop_id)
+    
+    if action:
+        return jsonify({
+            'message': 'Thành công',
+            'action': action, # 'added' hoặc 'removed'
+            'success': True
+        })
+    else:
+        return jsonify({'error': 'Lỗi xử lý (Không tìm thấy User hoặc Shop)'}), 400
 
 # --- 4. API QUÊN MẬT KHẨU ---
 
@@ -319,3 +361,39 @@ if __name__ == '__main__':
         print("CẢNH BÁO: Chưa có key Gemini")
         
     app.run(debug=True)
+
+# --- Thêm vào index.py ---
+
+@app.route('/api/search-by-ai', methods=['POST'])
+def api_search_by_ai():
+    try:
+        data = request.get_json()
+        prompt = data.get('prompt', '')
+        
+        if not prompt:
+            return jsonify({'shops': [], 'message': 'Vui lòng nhập mô tả.'})
+
+        # Tái sử dụng hàm get_gemini_response từ utils (như đã dùng trong api_chat)
+        # Giả định hàm này trả về dict có key 'shop_ids'
+        # Bạn có thể cần truyền thêm tham số is_search=True vào utils nếu muốn tối ưu prompt
+        ai_result = utils.get_gemini_response(prompt, chat_history=[])
+        
+        found_shops = []
+        shop_ids = ai_result.get('shop_ids', [])
+
+        if shop_ids:
+            # Lấy thông tin shop từ DB dựa trên list ID
+            for sid in shop_ids:
+                s = utils.get_shop_by_id(sid)
+                if s:
+                    found_shops.append(s.to_dict())
+        
+        return jsonify({
+            'shops': found_shops,
+            'ai_reply': ai_result.get('answer', ''),
+            'success': True
+        })
+
+    except Exception as e:
+        print(f"AI Search Error: {e}")
+        return jsonify({'error': str(e), 'success': False}), 500

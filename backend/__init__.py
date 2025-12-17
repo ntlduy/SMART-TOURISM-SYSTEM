@@ -34,10 +34,9 @@ app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD', 'xdhj qdyc bgcg nh
 app.config['MAIL_DEFAULT_SENDER'] = 'duyn26353@gmail.com'
 
 
-CORS(app, supports_credentials=True)
-# CORS(app, origins=["http://localhost:3000"], supports_credentials=True)
-# CORS(app, resources={r"/api/*": {"origins": "http://localhost:3000"}}, supports_credentials=True)
-# CORS(app, resources={r"/api/*": {"origins": ["http://localhost:3000"]}}, supports_credentials=True)
+CORS(app, 
+     resources={r"/*": {"origins": "*"}},
+     supports_credentials=True)
 
 mail = Mail(app)
 db = SQLAlchemy(app=app)
